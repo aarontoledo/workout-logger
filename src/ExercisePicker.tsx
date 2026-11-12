@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { MEASURE_LABELS, searchExercises } from './exercises';
 
@@ -18,9 +18,22 @@ export function ExercisePicker({ value, onChange, placeholder }: {
   // Until the user types, show the whole library rather than filtering by the current name.
   const [hasTyped, setHasTyped] = useState(false);
   const [highlight, setHighlight] = useState(0);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const listId = useId();
+
+  // Close when the user taps or clicks anywhere outside the picker.
+  // (We can't close on input blur: on iOS, tapping a suggestion blurs the input
+  // before the tap's click fires, so the list would vanish before the selection registers.)
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [open]);
 
   const query = hasTyped ? value : '';
   const matches = useMemo(() => searchExercises(query), [query]);
@@ -58,7 +71,7 @@ export function ExercisePicker({ value, onChange, placeholder }: {
   };
 
   return (
-    <div className="relative">
+    <div ref={wrapperRef} className="relative">
       <input
         ref={inputRef}
         type="text"
@@ -80,7 +93,12 @@ export function ExercisePicker({ value, onChange, placeholder }: {
           // Keep the dropdown visible above the iOS keyboard.
           setTimeout(() => inputRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 300);
         }}
-        onBlur={() => setOpen(false)}
+        onBlur={(e) => {
+          // Close when focus moves to another field (e.g. Tab); taps inside the picker
+          // and dismissing the keyboard leave it open until an outside tap.
+          const next = e.relatedTarget as Node | null;
+          if (next && !wrapperRef.current?.contains(next)) setOpen(false);
+        }}
         onChange={(e) => {
           onChange(e.target.value);
           setHasTyped(true);
@@ -96,8 +114,8 @@ export function ExercisePicker({ value, onChange, placeholder }: {
         <button
           type="button"
           aria-label="Clear exercise"
-          // Prevent the input from losing focus so the list stays open after clearing.
-          onPointerDown={(e) => e.preventDefault()}
+          // Keep focus in the input on desktop so the keyboard caret stays put.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
             onChange('');
             setHasTyped(true);
@@ -119,8 +137,8 @@ export function ExercisePicker({ value, onChange, placeholder }: {
                   key={ex.name}
                   role="option"
                   aria-selected={i === highlight}
-                  // preventDefault keeps focus in the input so onBlur doesn't close the list before the tap registers.
-                  onPointerDown={(e) => e.preventDefault()}
+                  // Keep focus in the input on desktop while clicking a suggestion.
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => select(ex.name)}
                   onPointerEnter={() => setHighlight(i)}
                   className={`flex items-center justify-between gap-2 px-3 py-2.5 cursor-pointer border-b border-slate-800/70 last:border-0 ${
