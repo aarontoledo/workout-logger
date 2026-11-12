@@ -35,7 +35,7 @@ export const FIELD_CONFIG: Record<Field, { label: string; step: number; defaultV
   distance: { label: 'Distance (yds)', step: 5, defaultValue: 20 },
 };
 
-export type Exercise = { name: string; measure: Measure };
+export type Exercise = { name: string; measure: Measure; /** Short category label */ category: string };
 
 export type Category = {
   name: string;
@@ -52,7 +52,7 @@ const category = (
   name,
   short,
   exercises: (Object.entries(byMeasure) as [Measure, string[]][]).flatMap(
-    ([measure, names]) => names.map(exName => ({ name: exName, measure }))
+    ([measure, names]) => names.map(exName => ({ name: exName, measure, category: short }))
   ),
 });
 
@@ -171,6 +171,56 @@ const MEASURE_BY_NAME = new Map(ALL_EXERCISES.map(e => [e.name.toLowerCase(), e.
 /** Measurement type for an exercise name; custom (typed-in) exercises default to weight × reps. */
 export const getMeasure = (exerciseName: string): Measure =>
   MEASURE_BY_NAME.get(exerciseName.trim().toLowerCase()) ?? 'weight_reps';
+
+// Abbreviations people commonly type, matched in both directions.
+const SYNONYMS: [string, string][] = [
+  ['db', 'dumbbell'],
+  ['kb', 'kettlebell'],
+  ['rdl', 'romanian'],
+  ['trx', 'suspension'],
+  ['bw', 'bodyweight'],
+];
+
+const tokenVariants = (token: string): string[] => {
+  const variants = [token];
+  for (const [abbr, full] of SYNONYMS) {
+    if (token === abbr) variants.push(full);
+    if (full.startsWith(token) && token.length >= 3) variants.push(abbr);
+  }
+  return variants;
+};
+
+const SEARCH_INDEX = ALL_EXERCISES.map(e => {
+  const name = e.name.toLowerCase();
+  return {
+    exercise: e,
+    name,
+    words: name.split(/[\s\-()/]+/).filter(Boolean),
+    haystack: `${name} ${e.category.toLowerCase()}`,
+  };
+});
+
+/**
+ * Find exercises matching a query. Every typed word must appear somewhere in the
+ * exercise name or category (so "row", "kb swing" and "carries" all work).
+ * Results are ranked: name starts with query, then whole-query substring, then word matches.
+ */
+export function searchExercises(query: string): Exercise[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return ALL_EXERCISES;
+  const tokens = q.split(/\s+/).map(tokenVariants);
+
+  const results: { exercise: Exercise; score: number }[] = [];
+  for (const entry of SEARCH_INDEX) {
+    if (!tokens.every(variants => variants.some(v => entry.haystack.includes(v)))) continue;
+    let score = 0;
+    if (entry.name.startsWith(q)) score = 3;
+    else if (entry.name.includes(q)) score = 2;
+    else if (tokens.every(variants => variants.some(v => entry.words.some(w => w.startsWith(v))))) score = 1;
+    results.push({ exercise: entry.exercise, score });
+  }
+  return results.sort((a, b) => b.score - a.score).map(r => r.exercise);
+}
 
 export type StationConfig = { name: string; setsCount: number };
 

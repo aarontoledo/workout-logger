@@ -9,6 +9,7 @@ import {
   ALL_EXERCISES, EXERCISE_LIBRARY, FIELD_CONFIG, MEASURE_FIELDS, MEASURE_LABELS, PRESET_ROUTINES,
   getMeasure, type Field, type Measure, type StationConfig,
 } from './exercises';
+import { ExercisePicker } from './ExercisePicker';
 
 type WorkoutSet = {
   setNumber: number;
@@ -494,12 +495,6 @@ export default function App() {
           </div>
 
           {/* 6 Stations Input Fields with Autocomplete Datalist */}
-          <datalist id="exercise-master-list">
-            {ALL_EXERCISES.map((ex) => (
-              <option key={ex.name} value={ex.name} />
-            ))}
-          </datalist>
-
           <div className="space-y-3">
             {stationConfigs.map((config, index) => {
               const lastStat = getPreviousHistory(config.name);
@@ -534,13 +529,10 @@ export default function App() {
                     </div>
                   </div>
 
-                  <input
-                    type="text"
-                    list="exercise-master-list"
+                  <ExercisePicker
                     value={config.name}
-                    onChange={(e) => updateStationName(index, e.target.value)}
+                    onChange={(name) => updateStationName(index, name)}
                     placeholder={`Station ${index + 1} Movement...`}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm font-medium text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/60 transition-all"
                   />
 
                   <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-400">
