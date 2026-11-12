@@ -10,10 +10,9 @@
   "assets": {
     "not_found_handling": "single-page-application"
   },
-  // TODO: replace placeholder with the real subdomain before deploying.
-  // Deploying with this will create a DNS record for tbd.aarontoledo.com.
+  // Custom domain: Cloudflare creates the DNS record and certificate on deploy.
   "routes": [
-    { "pattern": "tbd.aarontoledo.com", "custom_domain": true }
+    { "pattern": "workout-logger.aarontoledo.com", "custom_domain": true }
   ],
   "observability": {
     "enabled": true
