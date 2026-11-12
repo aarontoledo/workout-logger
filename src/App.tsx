@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Dumbbell, Play, Plus, Check, Clock, Copy,
   Trash2, BarChart2, Flame, Award, ArrowLeft,
-  CheckCircle, Zap, RefreshCw, Layers
+  CheckCircle, Zap, RefreshCw, Layers, ChevronRight
 } from 'lucide-react';
 
 import {
@@ -145,6 +145,38 @@ export default function App() {
     }
   });
   const [copied, setCopied] = useState(false);
+
+  // Which saved workout the summary screen shows, and where it was opened from.
+  const [summaryId, setSummaryId] = useState<number | null>(null);
+  const [summaryOrigin, setSummaryOrigin] = useState<'finish' | 'history'>('finish');
+  // In-app confirmations (window.confirm is unreliable in iOS home-screen apps).
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingClearAll, setConfirmingClearAll] = useState(false);
+
+  const saveHistory = (updated: WorkoutLog[]) => {
+    setHistory(updated);
+    try {
+      if (updated.length > 0) localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      else localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      console.error("Failed to save workout history", e);
+    }
+  };
+
+  const openSummary = (id: number, origin: 'finish' | 'history') => {
+    setSummaryId(id);
+    setSummaryOrigin(origin);
+    setCopied(false);
+    setConfirmingDelete(false);
+    setView('summary');
+    window.scrollTo(0, 0);
+  };
+
+  const deleteWorkout = (id: number) => {
+    saveHistory(history.filter(h => h.id !== id));
+    setConfirmingDelete(false);
+    setView(summaryOrigin === 'history' ? 'history' : 'setup');
+  };
 
   // Timer interval handling
   useEffect(() => {
@@ -368,26 +400,16 @@ export default function App() {
       stations: activeWorkout
     };
 
-    const updatedHistory = [newEntry, ...history];
-    setHistory(updatedHistory);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory));
-    } catch (e) {
-      console.error("Failed to save workout", e);
-    }
-
-    setView('summary');
+    saveHistory([newEntry, ...history]);
+    openSummary(newEntry.id, 'finish');
   };
 
   // Clipboard export
-  const copySummaryToClipboard = () => {
-    if (history.length === 0) return;
-    const latest = history[0];
-    
-    let text = `🏋️‍♂️ Workout - ${latest.date}\n`;
-    text += `📊 Volume: ${latest.totalVolume.toLocaleString()} lbs | ${latest.totalCompletedSets} sets completed\n\n`;
+  const copySummaryToClipboard = (workout: WorkoutLog) => {
+    let text = `🏋️‍♂️ Workout - ${workout.date}\n`;
+    text += `📊 Volume: ${workout.totalVolume.toLocaleString()} lbs | ${workout.totalCompletedSets} sets completed\n\n`;
 
-    latest.stations.forEach((st, idx) => {
+    workout.stations.forEach((st, idx) => {
       text += `Station ${idx + 1}: ${st.name}\n`;
       st.sets.forEach(s => {
         if (s.completed) {
@@ -807,18 +829,34 @@ export default function App() {
     );
   }
 
-  if (view === 'summary') {
-    const latest = history[0];
+  const summaryEntry = view === 'summary' ? history.find(h => h.id === summaryId) : undefined;
+
+  if (view === 'summary' && summaryEntry) {
+    const latest = summaryEntry;
+    const fromHistory = summaryOrigin === 'history';
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between max-w-md mx-auto p-4 border-x border-slate-900 font-sans">
         <div>
+          {fromHistory && (
+            <div className="flex items-center justify-between my-3">
+              <button
+                onClick={() => setView('history')}
+                className="text-slate-400 hover:text-white flex items-center text-xs font-semibold"
+              >
+                <ArrowLeft className="w-4 h-4 mr-1" /> History
+              </button>
+            </div>
+          )}
+
           {/* Header */}
           <div className="text-center my-4">
             <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto mb-3">
               <Award className="w-8 h-8" />
             </div>
-            <h1 className="text-2xl font-black tracking-tight text-white">WORKOUT COMPLETE!</h1>
+            <h1 className="text-2xl font-black tracking-tight text-white">
+              {fromHistory ? 'WORKOUT SUMMARY' : 'WORKOUT COMPLETE!'}
+            </h1>
             <p className="text-xs text-slate-400">{latest?.date} • {latest?.time}</p>
           </div>
 
@@ -861,7 +899,7 @@ export default function App() {
 
           {/* Copy Summary Button */}
           <button
-            onClick={copySummaryToClipboard}
+            onClick={() => copySummaryToClipboard(latest)}
             className={`w-full py-3.5 rounded-2xl font-bold text-xs tracking-wider uppercase transition-all flex items-center justify-center space-x-2 border ${
               copied 
                 ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' 
@@ -871,22 +909,51 @@ export default function App() {
             {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4 text-amber-400" />}
             <span>{copied ? "COPIED TO CLIPBOARD!" : "COPY WORKOUT SUMMARY"}</span>
           </button>
+
+          {/* Delete this workout, with in-app confirmation */}
+          {confirmingDelete ? (
+            <div className="mt-4 bg-red-950/30 border border-red-500/30 rounded-2xl p-3">
+              <p className="text-xs text-red-200 text-center mb-3">Delete this workout? This can't be undone.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setConfirmingDelete(false)}
+                  className="py-2.5 rounded-xl text-xs font-bold bg-slate-900 border border-slate-800 text-slate-300"
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={() => deleteWorkout(latest.id)}
+                  className="py-2.5 rounded-xl text-xs font-bold bg-red-500 text-white"
+                >
+                  DELETE
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              className="w-full mt-3 text-red-400/80 hover:text-red-400 text-xs py-2 flex items-center justify-center gap-1 font-medium"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete This Workout
+            </button>
+          )}
         </div>
 
-        {/* Back Home Button */}
+        {/* Back Button */}
         <div className="py-4">
           <button
-            onClick={() => setView('setup')}
+            onClick={() => setView(fromHistory ? 'history' : 'setup')}
             className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-4 rounded-2xl text-sm shadow-lg shadow-amber-500/20"
           >
-            DONE & RETURN HOME
+            {fromHistory ? 'BACK TO HISTORY' : 'DONE & RETURN HOME'}
           </button>
         </div>
       </div>
     );
   }
 
-  if (view === 'history') {
+  // History (also the fallback if the summary's workout no longer exists)
+  if (view === 'history' || view === 'summary') {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between max-w-md mx-auto p-4 border-x border-slate-900 font-sans">
         <div>
@@ -911,7 +978,12 @@ export default function App() {
           ) : (
             <div className="space-y-4 my-4">
               {history.map((entry) => (
-                <div key={entry.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                <button
+                  type="button"
+                  key={entry.id}
+                  onClick={() => openSummary(entry.id, 'history')}
+                  className="block w-full text-left bg-slate-900 border border-slate-800 rounded-2xl p-4 hover:border-slate-700 active:scale-[0.99] transition-all"
+                >
                   <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-800">
                     <div>
                       <div className="text-sm font-bold text-white">{entry.date}</div>
@@ -933,7 +1005,11 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                </div>
+
+                  <div className="mt-3 pt-2 border-t border-slate-800 flex items-center justify-end text-[11px] font-semibold text-amber-400">
+                    View full summary <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                  </div>
+                </button>
               ))}
             </div>
           )}
@@ -942,17 +1018,34 @@ export default function App() {
         {/* Clear History Option */}
         {history.length > 0 && (
           <div className="py-4">
-            <button
-              onClick={() => {
-                if (window.confirm("Are you sure you want to clear your workout history?")) {
-                  setHistory([]);
-                  localStorage.removeItem(STORAGE_KEY);
-                }
-              }}
-              className="w-full text-red-400/80 hover:text-red-400 text-xs py-2 flex items-center justify-center gap-1 font-medium"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> Clear All History
-            </button>
+            {confirmingClearAll ? (
+              <div className="bg-red-950/30 border border-red-500/30 rounded-2xl p-3">
+                <p className="text-xs text-red-200 text-center mb-3">
+                  Delete all {history.length} saved workouts? This can't be undone.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setConfirmingClearAll(false)}
+                    className="py-2.5 rounded-xl text-xs font-bold bg-slate-900 border border-slate-800 text-slate-300"
+                  >
+                    CANCEL
+                  </button>
+                  <button
+                    onClick={() => { saveHistory([]); setConfirmingClearAll(false); }}
+                    className="py-2.5 rounded-xl text-xs font-bold bg-red-500 text-white"
+                  >
+                    DELETE ALL
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmingClearAll(true)}
+                className="w-full text-red-400/80 hover:text-red-400 text-xs py-2 flex items-center justify-center gap-1 font-medium"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Clear All History
+              </button>
+            )}
           </div>
         )}
       </div>
