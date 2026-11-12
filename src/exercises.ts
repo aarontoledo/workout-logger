@@ -1,0 +1,233 @@
+// Exercise library organized by movement pattern, using equipment typical of
+// small-group strength studios (trap bars, DBs, KBs, landmines, cables, TRX,
+// sleds, slam balls, bands, sandbags).
+
+/** How a set of an exercise is logged. */
+export type Measure =
+  | 'weight_reps'     // e.g. 50 lbs × 10 reps
+  | 'reps'            // bodyweight, e.g. 12 reps
+  | 'time'            // holds and intervals, e.g. 30 sec
+  | 'distance'        // bodyweight travel, e.g. 20 yds
+  | 'weight_distance'; // carries and sleds, e.g. 70 lbs × 40 yds
+
+export type Field = 'weight' | 'reps' | 'seconds' | 'distance';
+
+export const MEASURE_FIELDS: Record<Measure, Field[]> = {
+  weight_reps: ['weight', 'reps'],
+  reps: ['reps'],
+  time: ['seconds'],
+  distance: ['distance'],
+  weight_distance: ['weight', 'distance'],
+};
+
+export const MEASURE_LABELS: Record<Measure, string> = {
+  weight_reps: 'Weight × Reps',
+  reps: 'Reps',
+  time: 'Time',
+  distance: 'Distance',
+  weight_distance: 'Weight × Distance',
+};
+
+export const FIELD_CONFIG: Record<Field, { label: string; step: number; defaultValue: number }> = {
+  weight: { label: 'Weight (lbs)', step: 5, defaultValue: 25 },
+  reps: { label: 'Reps', step: 1, defaultValue: 10 },
+  seconds: { label: 'Time (sec)', step: 15, defaultValue: 30 },
+  distance: { label: 'Distance (yds)', step: 5, defaultValue: 20 },
+};
+
+export type Exercise = { name: string; measure: Measure };
+
+export type Category = {
+  name: string;
+  /** Short label for filter chips */
+  short: string;
+  exercises: Exercise[];
+};
+
+const category = (
+  name: string,
+  short: string,
+  byMeasure: Partial<Record<Measure, string[]>>
+): Category => ({
+  name,
+  short,
+  exercises: (Object.entries(byMeasure) as [Measure, string[]][]).flatMap(
+    ([measure, names]) => names.map(exName => ({ name: exName, measure }))
+  ),
+});
+
+export const EXERCISE_LIBRARY: Category[] = [
+  category('Squat (Knee Dominant)', 'Squat', {
+    weight_reps: [
+      'Trap Bar Squat', 'DB Goblet Squat', 'KB Front Squat', 'Barbell Box Squat',
+      'Landmine Squat', 'Barbell Back Squat', 'Heels-Elevated Goblet Squat',
+      'Sandbag Front Squat', 'Landmine Goblet Squat', 'Tempo Goblet Squat',
+    ],
+    reps: ['Bodyweight Air Squat'],
+    time: ['Wall Sit'],
+  }),
+  category('Hinge (Hip Dominant)', 'Hinge', {
+    weight_reps: [
+      'Trap Bar Deadlift', 'KB Deadlift', 'DB Romanian Deadlift (RDL)', 'Single-Leg RDL',
+      'KB Swing (Two-Arm)', 'KB Swing (Single-Arm)', 'Barbell Hip Thrust', 'Cable Pull-Through',
+      'Good Mornings', 'Single-Leg KB Deadlift', 'Staggered-Stance RDL', 'B-Stance Hip Thrust',
+      'DB Hip Thrust', 'KB Sumo Deadlift', 'Back Extension',
+    ],
+    reps: [
+      'Slider Hamstring Curl', 'Stability Ball Leg Curl', 'Glute Bridge',
+      'Banded Good Morning', 'Nordic Curl (Eccentric)',
+    ],
+  }),
+  category('Single-Leg & Lunge', 'Single-Leg', {
+    weight_reps: [
+      'DB Reverse Lunge', 'DB Lateral Lunge', 'DB Step-Up', 'DB Rear-Foot Elevated Split Squat',
+      'DB Walking Lunge', 'Goblet Reverse Lunge', 'Landmine Reverse Lunge',
+      'KB Front-Rack Split Squat', 'Slider Reverse Lunge', 'Lateral Step-Up',
+    ],
+    reps: ['TRX Single-Leg Squat', 'Curtsy Lunge', 'Cossack Squat'],
+  }),
+  category('Push (Upper Body)', 'Push', {
+    weight_reps: [
+      'DB Bench Press', 'DB Incline Press', 'Half-Kneeling DB Overhead Press', 'Landmine Press',
+      'DB Thrusters', 'Dumbbell Shoulder Press', 'Floor Press', 'DB Z-Press', 'Cable Chest Fly',
+      'Single-Arm DB Press', 'Half-Kneeling Landmine Press', 'Alternating DB Bench Press',
+      'Single-Arm Cable Press', 'DB Arnold Press', 'Landmine Push Press',
+    ],
+    reps: ['Push-Ups', 'TRX Suspension Push-Up', 'Deficit Push-Up', 'Incline Push-Up', 'Bench Dips'],
+  }),
+  category('Pull (Upper Body)', 'Pull', {
+    weight_reps: [
+      'Cable Seated Row', 'DB Bent-Over Row', '2-Point DB Row', 'Lat Pulldown', 'DB Renegade Row',
+      'Single-Arm KB Row', 'Face Pulls', 'Chest-Supported Row', 'Straight-Arm Cable Pulldown',
+      'Single-Arm Cable Row', 'Half-Kneeling Single-Arm Lat Pulldown', 'Meadows Row',
+      'Seal Row', 'DB Pullover',
+    ],
+    reps: [
+      'TRX Inverted Row', 'TRX Y-Raise', 'TRX T-Raise', 'TRX Face Pull', 'Banded Pull-Up',
+      'Chin-Up', 'Band Pull-Apart',
+    ],
+  }),
+  category('Core: Anti-Extension', 'Anti-Extension', {
+    reps: [
+      'Deadbug', 'Stability Ball Rollout', 'TRX Ab Rollout', 'Plank with Reach',
+      'Body Saw', 'Ab Wheel Rollout',
+    ],
+    time: ['Hollow Body Hold'],
+    distance: ['Bear Crawl'],
+  }),
+  category('Core: Anti-Rotation', 'Anti-Rotation', {
+    weight_reps: [
+      'Pallof Press', 'Half-Kneeling Cable Chop', 'Half-Kneeling Cable Lift', 'Bear Hold DB Drag',
+      'Landmine Rainbow', 'Tall-Kneeling Pallof Press with Overhead Reach', 'Russian Twist',
+    ],
+    time: ['Renegade Row Hold'],
+  }),
+  category('Core: Anti-Lateral Flexion', 'Anti-Lateral', {
+    weight_reps: ['Side Plank with Row'],
+    time: ['Side Plank', 'Copenhagen Plank'],
+    weight_distance: ['Single-Arm Overhead Carry'],
+  }),
+  category('Power', 'Power', {
+    weight_reps: [
+      'Kettlebell Clean', 'Kettlebell Snatch', 'Slam Ball Rainbows', 'Overhead Slam Ball',
+      'Medicine Ball Chest Pass', 'Rotational Med Ball Throw', 'Landmine Rotational Press',
+      'Trap Bar Jump', 'KB High Pull',
+    ],
+    reps: ['Skater Jumps', 'Box Jumps', 'Broad Jump', 'Lateral Bound', 'Burpees'],
+    weight_distance: ['Sled Sprint'],
+  }),
+  category('Carries & Loaded Movement', 'Carries', {
+    weight_distance: [
+      "Farmer's Walk", 'Suitcase Carry', 'Front-Rack KB Carry', 'Overhead KB Carry',
+      'Sandbag Bear-Hug Carry', 'Sled Push', 'Sled Drag (Backward)', 'Sled Row',
+    ],
+  }),
+  category('Conditioning', 'Conditioning', {
+    time: [
+      'SkiErg Sprint', 'Rowing Ergometer Sprint', 'Air Bike Sprint', 'Treadmill Sprint',
+      'Battle Rope Slams', 'Battle Rope Alternating Waves', 'Jump Rope', 'Mountain Climbers',
+      'Lateral Shuffles',
+    ],
+  }),
+  category('Arms & Accessories', 'Arms', {
+    weight_reps: [
+      'DB Biceps Curl', 'Hammer Curl', 'Cable Curl', 'Cable Triceps Pushdown', 'DB Skull Crusher',
+      'Overhead Triceps Extension', 'Lateral Raise', 'Rear Delt Fly',
+    ],
+    reps: ['TRX Biceps Curl', 'TRX Triceps Extension'],
+  }),
+  category('Mobility & Warm-up', 'Mobility', {
+    reps: [
+      "World's Greatest Stretch", '90/90 Hip Switch', 'Thoracic Open Book', 'Cat-Cow',
+      'Banded Shoulder Dislocate', 'Inchworm', 'Spiderman Lunge with Reach', 'Glute Bridge March',
+    ],
+  }),
+];
+
+export const ALL_EXERCISES: Exercise[] = EXERCISE_LIBRARY.flatMap(c => c.exercises);
+
+const MEASURE_BY_NAME = new Map(ALL_EXERCISES.map(e => [e.name.toLowerCase(), e.measure]));
+
+/** Measurement type for an exercise name; custom (typed-in) exercises default to weight × reps. */
+export const getMeasure = (exerciseName: string): Measure =>
+  MEASURE_BY_NAME.get(exerciseName.trim().toLowerCase()) ?? 'weight_reps';
+
+export type StationConfig = { name: string; setsCount: number };
+
+export const PRESET_ROUTINES: { name: string; exercises: StationConfig[] }[] = [
+  {
+    name: 'Full Body Balance',
+    exercises: [
+      { name: 'Trap Bar Deadlift', setsCount: 4 },
+      { name: 'DB Bench Press', setsCount: 4 },
+      { name: 'DB Goblet Squat', setsCount: 3 },
+      { name: 'Cable Seated Row', setsCount: 3 },
+      { name: 'Pallof Press', setsCount: 3 },
+      { name: 'Slam Ball Rainbows', setsCount: 2 },
+    ],
+  },
+  {
+    name: 'Lower Body Focus',
+    exercises: [
+      { name: 'Trap Bar Squat', setsCount: 4 },
+      { name: 'Single-Leg RDL', setsCount: 3 },
+      { name: 'DB Reverse Lunge', setsCount: 3 },
+      { name: 'KB Swing (Two-Arm)', setsCount: 4 },
+      { name: 'Suitcase Carry', setsCount: 3 },
+      { name: 'Skater Jumps', setsCount: 2 },
+    ],
+  },
+  {
+    name: 'Upper Body Focus',
+    exercises: [
+      { name: 'DB Incline Press', setsCount: 4 },
+      { name: 'TRX Inverted Row', setsCount: 4 },
+      { name: 'Landmine Press', setsCount: 3 },
+      { name: 'Lat Pulldown', setsCount: 3 },
+      { name: 'Push-Ups', setsCount: 3 },
+      { name: 'Battle Rope Slams', setsCount: 2 },
+    ],
+  },
+  {
+    name: 'Strength & Conditioning',
+    exercises: [
+      { name: 'Trap Bar Deadlift', setsCount: 4 },
+      { name: 'Half-Kneeling Landmine Press', setsCount: 3 },
+      { name: 'DB Walking Lunge', setsCount: 3 },
+      { name: 'Single-Arm Cable Row', setsCount: 3 },
+      { name: 'Sled Push', setsCount: 3 },
+      { name: 'Air Bike Sprint', setsCount: 4 },
+    ],
+  },
+  {
+    name: 'Core & Carry',
+    exercises: [
+      { name: 'KB Front Squat', setsCount: 3 },
+      { name: 'Deadbug', setsCount: 3 },
+      { name: 'Half-Kneeling Cable Chop', setsCount: 3 },
+      { name: 'Side Plank', setsCount: 3 },
+      { name: "Farmer's Walk", setsCount: 3 },
+      { name: 'Hollow Body Hold', setsCount: 3 },
+    ],
+  },
+];

@@ -5,21 +5,26 @@ import {
   CheckCircle, Zap, RefreshCw, Layers
 } from 'lucide-react';
 
+import {
+  ALL_EXERCISES, EXERCISE_LIBRARY, FIELD_CONFIG, MEASURE_FIELDS, MEASURE_LABELS, PRESET_ROUTINES,
+  getMeasure, type Field, type Measure, type StationConfig,
+} from './exercises';
+
 type WorkoutSet = {
   setNumber: number;
   weight: number;
   reps: number;
+  // Added with time/distance tracking; absent on older saved workouts.
+  seconds?: number;
+  distance?: number;
   completed: boolean;
 };
 
 type Station = {
   name: string;
+  // Absent on older saved workouts; resolve with stationMeasure().
+  measure?: Measure;
   sets: WorkoutSet[];
-};
-
-type StationConfig = {
-  name: string;
-  setsCount: number;
 };
 
 type WorkoutLog = {
@@ -33,96 +38,90 @@ type WorkoutLog = {
 
 type View = 'setup' | 'workout' | 'summary' | 'history';
 
-// Comprehensive Categorized Alloy Exercise Library by Movement Pattern
-const EXERCISE_LIBRARY: Record<string, string[]> = {
-  "Squat (Knee Dominant)": [
-    "Trap Bar Squat", "DB Goblet Squat", "KB Front Squat", "Barbell Box Squat",
-    "Landmine Squat", "TRX Single-Leg Squat", "DB Lateral Lunge", "DB Rear-Foot Elevated Split Squat",
-    "DB Reverse Lunge", "DB Step-Up", "Barbell Back Squat", "Bodyweight Air Squat"
-  ],
-  "Hinge (Hip Dominant)": [
-    "Trap Bar Deadlift", "KB Deadlift", "DB Romanian Deadlift (RDL)", "Single-Leg RDL",
-    "KB Swing (Two-Arm)", "KB Swing (Single-Arm)", "Barbell Hip Thrust", "Slider Hamstring Curl",
-    "Stability Ball Leg Curl", "Cable Pull-Through", "Good Mornings", "Glute Bridge"
-  ],
-  "Push (Upper Body)": [
-    "DB Bench Press", "DB Incline Press", "Half-Kneeling DB Overhead Press", "Push-Ups",
-    "TRX Suspension Push-Up", "Landmine Press", "DB Thrusters", "Dumbbell Shoulder Press",
-    "Floor Press", "DB Z-Press", "Cable Chest Fly", "Single-Arm DB Press"
-  ],
-  "Pull (Upper Body)": [
-    "Cable Seated Row", "DB Bent-Over Row", "2-Point DB Row", "TRX Inverted Row",
-    "TRX Y-Raise", "Lat Pulldown", "Banded Pull-Up", "DB Renegade Row",
-    "Single-Arm KB Row", "Face Pulls", "Chest-Supported Row", "Straight-Arm Cable Pulldown"
-  ],
-  "Core & Stability": [
-    "Pallof Press", "Half-Kneeling Cable Chop", "Half-Kneeling Cable Lift", "Suitcase Carry",
-    "Farmer's Walk", "Bear Hold DB Drag", "Stability Ball Rollout", "TRX Ab Rollout",
-    "Plank with Reach", "Deadbug", "Side Plank with Row", "Russian Twist"
-  ],
-  "Power & Cardio": [
-    "Kettlebell Clean", "Kettlebell Snatch", "Slam Ball Rainbows", "Overhead Slam Ball",
-    "Skater Jumps", "Lateral Shuffles", "Battle Rope Slams", "Battle Rope Alternating Waves",
-    "Box Jumps", "SkiErg Sprint", "Rowing Ergometer Sprint", "Burpees"
-  ]
+const STORAGE_KEY = 'workout_history';
+
+const stationMeasure = (st: Station): Measure => st.measure ?? getMeasure(st.name);
+
+// The values a set carries forward to the next set (everything except number/completion).
+const setValues = (s: Partial<WorkoutSet> = {}) => ({
+  weight: s.weight ?? FIELD_CONFIG.weight.defaultValue,
+  reps: s.reps ?? FIELD_CONFIG.reps.defaultValue,
+  seconds: s.seconds ?? FIELD_CONFIG.seconds.defaultValue,
+  distance: s.distance ?? FIELD_CONFIG.distance.defaultValue,
+});
+
+const formatDuration = (totalSeconds: number) => {
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const m = Math.floor(totalSeconds / 60);
+  const sec = totalSeconds % 60;
+  return `${m}:${sec < 10 ? '0' : ''}${sec}`;
 };
 
-// Flattened master array for instant search matching
-const ALL_EXERCISES = Object.values(EXERCISE_LIBRARY).flat();
-
-// Quick setup preset routines with variable set counts per station
-const PRESET_ROUTINES: { name: string; exercises: StationConfig[] }[] = [
-  {
-    name: "Full Body Balance (Alloy Standard)",
-    exercises: [
-      { name: "Trap Bar Deadlift", setsCount: 4 },
-      { name: "DB Bench Press", setsCount: 4 },
-      { name: "DB Goblet Squat", setsCount: 3 },
-      { name: "Cable Seated Row", setsCount: 3 },
-      { name: "Pallof Press", setsCount: 3 },
-      { name: "Slam Ball Rainbows", setsCount: 2 }
-    ]
-  },
-  {
-    name: "Lower Body Focus",
-    exercises: [
-      { name: "Trap Bar Squat", setsCount: 4 },
-      { name: "Single-Leg RDL", setsCount: 3 },
-      { name: "DB Reverse Lunge", setsCount: 3 },
-      { name: "KB Swing (Two-Arm)", setsCount: 4 },
-      { name: "Suitcase Carry", setsCount: 3 },
-      { name: "Skater Jumps", setsCount: 2 }
-    ]
-  },
-  {
-    name: "Upper Body Focus",
-    exercises: [
-      { name: "DB Incline Press", setsCount: 4 },
-      { name: "TRX Inverted Row", setsCount: 4 },
-      { name: "Landmine Press", setsCount: 3 },
-      { name: "Lat Pulldown", setsCount: 3 },
-      { name: "Push-Ups", setsCount: 3 },
-      { name: "Battle Rope Slams", setsCount: 2 }
-    ]
+/** Human-readable set result, e.g. "50 lbs × 10 reps", "45s", "70 lbs × 40 yds". */
+const formatSet = (s: WorkoutSet, measure: Measure, compact = false) => {
+  const v = setValues(s);
+  switch (measure) {
+    case 'weight_reps':
+      return compact ? `${v.weight}×${v.reps}` : `${v.weight} lbs × ${v.reps} reps`;
+    case 'reps':
+      return `${v.reps} reps`;
+    case 'time':
+      return formatDuration(v.seconds);
+    case 'distance':
+      return `${v.distance} yds`;
+    case 'weight_distance':
+      return compact ? `${v.weight}×${v.distance}yd` : `${v.weight} lbs × ${v.distance} yds`;
   }
-];
+};
+
+function Stepper({ field, value, onSet, onStep }: {
+  field: Field;
+  value: number;
+  onSet: (value: number) => void;
+  onStep: (delta: number) => void;
+}) {
+  const { label, step } = FIELD_CONFIG[field];
+  return (
+    <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+      <div className="text-[10px] uppercase font-bold text-slate-400 mb-1">{label}</div>
+      <div className="flex items-center justify-between">
+        <input
+          type="number"
+          inputMode="numeric"
+          value={value}
+          onChange={(e) => onSet(Number(e.target.value))}
+          className="w-16 bg-transparent text-xl font-bold text-white focus:outline-none"
+        />
+        <div className="flex space-x-1">
+          <button
+            onClick={() => onStep(-step)}
+            className="w-8 h-7 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold"
+          >
+            -{step}
+          </button>
+          <button
+            onClick={() => onStep(step)}
+            className="w-8 h-7 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold"
+          >
+            +{step}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   // Navigation State: 'setup' | 'workout' | 'summary' | 'history'
   const [view, setView] = useState<View>('setup');
   
-  // Selected Category filter for quick picker: 'All' | category string
+  // Selected Category filter for quick picker: 'All' | category name
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('All');
   
   // Setup State - Array of 6 station configurations (name + independent sets count)
-  const [stationConfigs, setStationConfigs] = useState<StationConfig[]>([
-    { name: "Trap Bar Deadlift", setsCount: 4 },
-    { name: "DB Bench Press", setsCount: 4 },
-    { name: "DB Goblet Squat", setsCount: 3 },
-    { name: "Cable Seated Row", setsCount: 3 },
-    { name: "Pallof Press", setsCount: 3 },
-    { name: "Slam Ball Rainbows", setsCount: 2 }
-  ]);
+  const [stationConfigs, setStationConfigs] = useState<StationConfig[]>(
+    () => PRESET_ROUTINES[0].exercises.map(ex => ({ ...ex }))
+  );
 
   // Active Workout Data Structure
   const [activeWorkout, setActiveWorkout] = useState<Station[]>([]);
@@ -137,7 +136,7 @@ export default function App() {
   // Load history from localStorage on initial render
   const [history, setHistory] = useState<WorkoutLog[]>(() => {
     try {
-      const saved = localStorage.getItem('alloy_workout_history');
+      const saved = localStorage.getItem(STORAGE_KEY);
       return saved ? JSON.parse(saved) : [];
     } catch (e) {
       console.error("Failed to load history", e);
@@ -178,7 +177,7 @@ export default function App() {
       const found = workout.stations.find(s => s.name.toLowerCase() === exerciseName.toLowerCase());
       if (found && found.sets.length > 0) {
         const lastSet = found.sets[found.sets.length - 1];
-        return { date: workout.date, weight: lastSet.weight, reps: lastSet.reps };
+        return { date: workout.date, set: lastSet, measure: stationMeasure(found) };
       }
     }
     return null;
@@ -188,19 +187,18 @@ export default function App() {
   const handleStartWorkout = () => {
     const initialized = stationConfigs.map(config => {
       const prev = getPreviousHistory(config.name);
-      const initialWeight = prev ? prev.weight : 25;
-      const initialReps = prev ? prev.reps : 10;
+      const initial = setValues(prev?.set);
       const count = config.setsCount || 3;
       
       const sets = Array.from({ length: count }, (_, i) => ({
         setNumber: i + 1,
-        weight: initialWeight,
-        reps: initialReps,
+        ...initial,
         completed: false
       }));
 
       return {
         name: config.name,
+        measure: getMeasure(config.name),
         sets
       };
     });
@@ -240,8 +238,7 @@ export default function App() {
       
       const newSet = {
         setNumber: sets.length + 1,
-        weight: lastSet ? lastSet.weight : 25,
-        reps: lastSet ? lastSet.reps : 10,
+        ...setValues(lastSet),
         completed: false
       };
       
@@ -274,7 +271,7 @@ export default function App() {
   };
 
   // Update Set Data
-  const updateSet = (stationIdx: number, setIdx: number, field: 'weight' | 'reps', deltaOrValue: number, isDelta = false) => {
+  const updateSet = (stationIdx: number, setIdx: number, field: Field, deltaOrValue: number, isDelta = false) => {
     setActiveWorkout(prev => {
       const updated = [...prev];
       const station = { ...updated[stationIdx] };
@@ -310,8 +307,7 @@ export default function App() {
       if (newlyCompleted && setIdx < sets.length - 1 && !sets[setIdx + 1].completed) {
         sets[setIdx + 1] = {
           ...sets[setIdx + 1],
-          weight: target.weight,
-          reps: target.reps
+          ...setValues(target)
         };
       }
 
@@ -334,8 +330,7 @@ export default function App() {
 
       sets[setIdx] = {
         ...sets[setIdx],
-        weight: prevSet.weight,
-        reps: prevSet.reps,
+        ...setValues(prevSet),
         completed: true
       };
 
@@ -352,9 +347,12 @@ export default function App() {
     let totalCompletedSets = 0;
 
     activeWorkout.forEach(st => {
+      const countsTowardVolume = stationMeasure(st) === 'weight_reps';
       st.sets.forEach(s => {
         if (s.completed) {
-          totalVolume += (Number(s.weight) || 0) * (Number(s.reps) || 0);
+          if (countsTowardVolume) {
+            totalVolume += (Number(s.weight) || 0) * (Number(s.reps) || 0);
+          }
           totalCompletedSets += 1;
         }
       });
@@ -372,7 +370,7 @@ export default function App() {
     const updatedHistory = [newEntry, ...history];
     setHistory(updatedHistory);
     try {
-      localStorage.setItem('alloy_workout_history', JSON.stringify(updatedHistory));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory));
     } catch (e) {
       console.error("Failed to save workout", e);
     }
@@ -385,14 +383,14 @@ export default function App() {
     if (history.length === 0) return;
     const latest = history[0];
     
-    let text = `🏋️‍♂️ Alloy Workout - ${latest.date}\n`;
+    let text = `🏋️‍♂️ Workout - ${latest.date}\n`;
     text += `📊 Volume: ${latest.totalVolume.toLocaleString()} lbs | ${latest.totalCompletedSets} sets completed\n\n`;
 
     latest.stations.forEach((st, idx) => {
       text += `Station ${idx + 1}: ${st.name}\n`;
       st.sets.forEach(s => {
         if (s.completed) {
-          text += `  • Set ${s.setNumber}: ${s.weight} lbs × ${s.reps} reps\n`;
+          text += `  • Set ${s.setNumber}: ${formatSet(s, stationMeasure(st))}\n`;
         }
       });
     });
@@ -403,13 +401,12 @@ export default function App() {
   };
 
   // Filter options for movement chips
-  const getExercisesForCategory = (cat: string, stationIdx: number) => {
+  const getExercisesForCategory = (cat: string, stationIdx: number): string[] => {
     if (cat === 'All') {
-      const keys = Object.keys(EXERCISE_LIBRARY);
-      const chosenKey = keys[stationIdx % keys.length];
-      return EXERCISE_LIBRARY[chosenKey].slice(0, 5);
+      const chosen = EXERCISE_LIBRARY[stationIdx % EXERCISE_LIBRARY.length];
+      return chosen.exercises.slice(0, 5).map(e => e.name);
     }
-    return EXERCISE_LIBRARY[cat] || [];
+    return EXERCISE_LIBRARY.find(c => c.name === cat)?.exercises.map(e => e.name) ?? [];
   };
 
   // Render Setup Screen
@@ -424,7 +421,7 @@ export default function App() {
                 <Zap className="w-6 h-6" />
               </div>
               <div>
-                <h1 className="text-xl font-bold tracking-wide text-white">Alloy 6-Station Logger</h1>
+                <h1 className="text-xl font-bold tracking-wide text-white">6-Station Workout Logger</h1>
                 <p className="text-xs text-slate-400">Independent Sets Per Station</p>
               </div>
             </div>
@@ -479,9 +476,10 @@ export default function App() {
               <span className="text-[10px] text-amber-400/80">{ALL_EXERCISES.length} Exercises Loaded</span>
             </div>
             <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-              {['All', ...Object.keys(EXERCISE_LIBRARY)].map((cat) => (
+              {[{ name: 'All', short: 'All' }, ...EXERCISE_LIBRARY].map(({ name: cat, short }) => (
                 <button
                   key={cat}
+                  title={cat}
                   onClick={() => setActiveCategoryFilter(cat)}
                   className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
                     activeCategoryFilter === cat 
@@ -489,7 +487,7 @@ export default function App() {
                       : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
                   }`}
                 >
-                  {cat.split(' ')[0]}
+                  {short}
                 </button>
               ))}
             </div>
@@ -497,8 +495,8 @@ export default function App() {
 
           {/* 6 Stations Input Fields with Autocomplete Datalist */}
           <datalist id="exercise-master-list">
-            {ALL_EXERCISES.map((ex, i) => (
-              <option key={i} value={ex} />
+            {ALL_EXERCISES.map((ex) => (
+              <option key={ex.name} value={ex.name} />
             ))}
           </datalist>
 
@@ -545,15 +543,14 @@ export default function App() {
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm font-medium text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/60 transition-all"
                   />
 
-                  {lastStat && (
-                    <div className="mt-1 text-[10px] text-slate-400">
-                      PR: {lastStat.weight}lbs × {lastStat.reps}
-                    </div>
-                  )}
+                  <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                    <span>{lastStat ? `Last: ${formatSet(lastStat.set, lastStat.measure)}` : ''}</span>
+                    <span className="text-slate-500">Tracks {MEASURE_LABELS[getMeasure(config.name)]}</span>
+                  </div>
 
                   {/* Quick Select Chips from Movement Library */}
                   <div className="flex gap-1.5 overflow-x-auto mt-2 pt-0.5 no-scrollbar">
-                    {chipOptions.slice(0, 4).map((item, i) => (
+                    {chipOptions.map((item, i) => (
                       <button
                         key={i}
                         onClick={() => updateStationName(index, item)}
@@ -587,6 +584,8 @@ export default function App() {
   if (view === 'workout') {
     const currentStation = activeWorkout[activeStationIndex];
     const previous = getPreviousHistory(currentStation.name);
+    const currentMeasure = stationMeasure(currentStation);
+    const currentFields = MEASURE_FIELDS[currentMeasure];
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between max-w-md mx-auto p-4 border-x border-slate-900 font-sans relative">
@@ -664,6 +663,9 @@ export default function App() {
               <div className="text-xs font-bold uppercase tracking-wider text-amber-400">
                 Station {activeStationIndex + 1} ({currentStation.sets.length} Sets Scheduled)
               </div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                {MEASURE_LABELS[currentMeasure]}
+              </div>
             </div>
             <h2 className="text-xl font-bold text-white tracking-wide mb-1">{currentStation.name}</h2>
             
@@ -671,7 +673,7 @@ export default function App() {
             {previous && (
               <div className="text-xs text-slate-400 mt-2 flex items-center gap-1 bg-slate-950/60 p-2 rounded-xl border border-slate-800/80">
                 <Flame className="w-3.5 h-3.5 text-amber-400" />
-                <span>PR / Last Session: <strong className="text-slate-200">{previous.weight} lbs × {previous.reps} reps</strong></span>
+                <span>PR / Last Session: <strong className="text-slate-200">{formatSet(previous.set, previous.measure)}</strong></span>
               </div>
             )}
           </div>
@@ -719,61 +721,17 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Weight & Reps Stepper Controls */}
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  {/* Weight Input Box */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
-                    <div className="text-[10px] uppercase font-bold text-slate-400 mb-1">Weight (lbs)</div>
-                    <div className="flex items-center justify-between">
-                      <input
-                        type="number"
-                        value={set.weight}
-                        onChange={(e) => updateSet(activeStationIndex, setIdx, 'weight', Number(e.target.value))}
-                        className="w-16 bg-transparent text-xl font-bold text-white focus:outline-none"
-                      />
-                      <div className="flex space-x-1">
-                        <button
-                          onClick={() => updateSet(activeStationIndex, setIdx, 'weight', -5, true)}
-                          className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold"
-                        >
-                          -5
-                        </button>
-                        <button
-                          onClick={() => updateSet(activeStationIndex, setIdx, 'weight', 5, true)}
-                          className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold"
-                        >
-                          +5
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Reps Input Box */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
-                    <div className="text-[10px] uppercase font-bold text-slate-400 mb-1">Reps</div>
-                    <div className="flex items-center justify-between">
-                      <input
-                        type="number"
-                        value={set.reps}
-                        onChange={(e) => updateSet(activeStationIndex, setIdx, 'reps', Number(e.target.value))}
-                        className="w-16 bg-transparent text-xl font-bold text-white focus:outline-none"
-                      />
-                      <div className="flex space-x-1">
-                        <button
-                          onClick={() => updateSet(activeStationIndex, setIdx, 'reps', -1, true)}
-                          className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold"
-                        >
-                          -1
-                        </button>
-                        <button
-                          onClick={() => updateSet(activeStationIndex, setIdx, 'reps', 1, true)}
-                          className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold"
-                        >
-                          +1
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                {/* Steppers for this exercise's measurement type */}
+                <div className={`grid gap-3 mb-3 ${currentFields.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {currentFields.map(field => (
+                    <Stepper
+                      key={field}
+                      field={field}
+                      value={set[field] ?? FIELD_CONFIG[field].defaultValue}
+                      onSet={(v) => updateSet(activeStationIndex, setIdx, field, v)}
+                      onStep={(d) => updateSet(activeStationIndex, setIdx, field, d, true)}
+                    />
+                  ))}
                 </div>
 
                 {/* Complete Set Action Button */}
@@ -900,7 +858,7 @@ export default function App() {
                   <div className="flex flex-wrap gap-2 mt-1">
                     {st.sets.filter(s => s.completed).map((s, idx) => (
                       <span key={idx} className="text-[11px] bg-slate-950 border border-slate-800 px-2 py-0.5 rounded-md text-slate-300">
-                        {s.weight}lbs × {s.reps}
+                        {formatSet(s, stationMeasure(st))}
                       </span>
                     ))}
                   </div>
@@ -978,7 +936,7 @@ export default function App() {
                       <div key={i} className="text-xs flex justify-between text-slate-300">
                         <span className="font-medium text-slate-400">S{i+1}: {st.name}</span>
                         <span className="font-bold">
-                          {st.sets.filter(s => s.completed).map(s => `${s.weight}×${s.reps}`).join(', ')}
+                          {st.sets.filter(s => s.completed).map(s => formatSet(s, stationMeasure(st), true)).join(', ')}
                         </span>
                       </div>
                     ))}
@@ -996,7 +954,7 @@ export default function App() {
               onClick={() => {
                 if (window.confirm("Are you sure you want to clear your workout history?")) {
                   setHistory([]);
-                  localStorage.removeItem('alloy_workout_history');
+                  localStorage.removeItem(STORAGE_KEY);
                 }
               }}
               className="w-full text-red-400/80 hover:text-red-400 text-xs py-2 flex items-center justify-center gap-1 font-medium"
