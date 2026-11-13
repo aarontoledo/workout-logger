@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { MEASURE_LABELS, searchExercises } from './exercises';
+import { MEASURE_LABELS, MEASURE_SHORT, searchExercises } from './exercises';
 
 /**
  * Exercise name input with a custom suggestion dropdown. Replaces <datalist>,
@@ -148,7 +148,9 @@ export function ExercisePicker({ value, onChange, placeholder }: {
                   <span className="text-sm text-slate-100">{ex.name}</span>
                   <span className="shrink-0 text-right leading-tight">
                     <span className="block text-[10px] font-semibold text-amber-400/90">{ex.category}</span>
-                    <span className="block text-[10px] text-slate-500">{MEASURE_LABELS[ex.measure]}</span>
+                    <span className="block text-[10px] text-slate-500">{ex.measures.length > 1
+                        ? ex.measures.map(m => MEASURE_SHORT[m]).join(' / ')
+                        : MEASURE_LABELS[ex.measure]}</span>
                   </span>
                 </li>
               ))}

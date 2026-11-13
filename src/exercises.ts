@@ -4,20 +4,26 @@
 
 /** How a set of an exercise is logged. */
 export type Measure =
-  | 'weight_reps'     // e.g. 50 lbs × 10 reps
-  | 'reps'            // bodyweight, e.g. 12 reps
-  | 'time'            // holds and intervals, e.g. 30 sec
-  | 'distance'        // bodyweight travel, e.g. 20 yds
-  | 'weight_distance'; // carries and sleds, e.g. 70 lbs × 40 yds
+  | 'weight_reps'      // e.g. 50 lbs × 10 reps
+  | 'reps'             // bodyweight, e.g. 12 reps
+  | 'time'             // holds and intervals, e.g. 30 sec
+  | 'distance'         // e.g. 20 yds, 500 m
+  | 'calories'         // machines, e.g. 15 cal
+  | 'weight_distance'  // carries and sleds, e.g. 70 lbs × 40 yds
+  | 'weight_time';     // carries and sleds for time, e.g. 70 lbs × 30 sec
 
-export type Field = 'weight' | 'reps' | 'seconds' | 'distance';
+export type Field = 'weight' | 'reps' | 'seconds' | 'distance' | 'calories';
+
+export type DistanceUnit = 'yds' | 'm';
 
 export const MEASURE_FIELDS: Record<Measure, Field[]> = {
   weight_reps: ['weight', 'reps'],
   reps: ['reps'],
   time: ['seconds'],
   distance: ['distance'],
+  calories: ['calories'],
   weight_distance: ['weight', 'distance'],
+  weight_time: ['weight', 'seconds'],
 };
 
 export const MEASURE_LABELS: Record<Measure, string> = {
@@ -25,23 +31,86 @@ export const MEASURE_LABELS: Record<Measure, string> = {
   reps: 'Reps',
   time: 'Time',
   distance: 'Distance',
+  calories: 'Calories',
   weight_distance: 'Weight × Distance',
+  weight_time: 'Weight × Time',
 };
 
-export const FIELD_CONFIG: Record<Field, { label: string; step: number; defaultValue: number }> = {
+/** Compact labels for the tracking switch. */
+export const MEASURE_SHORT: Record<Measure, string> = {
+  weight_reps: 'Wt × Reps',
+  reps: 'Reps',
+  time: 'Time',
+  distance: 'Distance',
+  calories: 'Cals',
+  weight_distance: 'Wt × Dist',
+  weight_time: 'Wt × Time',
+};
+
+type FieldSettings = { label: string; step: number; defaultValue: number };
+
+const FIELD_SETTINGS: Record<Exclude<Field, 'distance'>, FieldSettings> = {
   weight: { label: 'Weight (lbs)', step: 5, defaultValue: 25 },
   reps: { label: 'Reps', step: 1, defaultValue: 10 },
   seconds: { label: 'Time (sec)', step: 15, defaultValue: 30 },
-  distance: { label: 'Distance (yds)', step: 5, defaultValue: 20 },
+  calories: { label: 'Calories', step: 1, defaultValue: 10 },
 };
 
-export type Exercise = { name: string; measure: Measure; /** Short category label */ category: string };
+const DISTANCE_SETTINGS: Record<DistanceUnit, FieldSettings> = {
+  yds: { label: 'Distance (yds)', step: 5, defaultValue: 20 },
+  m: { label: 'Distance (m)', step: 50, defaultValue: 500 },
+};
+
+/** Label, stepper increment and starting value for an input field. */
+export const fieldConfig = (field: Field, unit: DistanceUnit = 'yds'): FieldSettings =>
+  field === 'distance' ? DISTANCE_SETTINGS[unit] : FIELD_SETTINGS[field];
+
+export type Exercise = {
+  name: string;
+  /** Default way to track this exercise (same as measures[0]) */
+  measure: Measure;
+  /** Every way this exercise can be tracked; the first is the default */
+  measures: Measure[];
+  distanceUnit: DistanceUnit;
+  /** Short category label */
+  category: string;
+};
 
 export type Category = {
   name: string;
   /** Short label for filter chips */
   short: string;
   exercises: Exercise[];
+};
+
+// Exercises that can be tracked more than one way. The first measure must match
+// the group the exercise is listed under in EXERCISE_LIBRARY (its default).
+type TrackingOptions = { measures: Measure[]; distanceUnit?: DistanceUnit };
+const MACHINE: TrackingOptions = { measures: ['time', 'distance', 'calories'], distanceUnit: 'm' };
+const LOADED_TRAVEL: TrackingOptions = { measures: ['weight_distance', 'weight_time'] };
+const TIME_OR_REPS: TrackingOptions = { measures: ['time', 'reps'] };
+
+const TRACKING_OPTIONS: Record<string, TrackingOptions> = {
+  'SkiErg Sprint': MACHINE,
+  'Rowing Ergometer Sprint': MACHINE,
+  'Air Bike Sprint': MACHINE,
+  'Treadmill Sprint': MACHINE,
+  'Sled Push': LOADED_TRAVEL,
+  'Sled Drag (Backward)': LOADED_TRAVEL,
+  'Sled Row': LOADED_TRAVEL,
+  'Sled Sprint': LOADED_TRAVEL,
+  "Farmer's Walk": LOADED_TRAVEL,
+  'Suitcase Carry': LOADED_TRAVEL,
+  'Front-Rack KB Carry': LOADED_TRAVEL,
+  'Overhead KB Carry': LOADED_TRAVEL,
+  'Sandbag Bear-Hug Carry': LOADED_TRAVEL,
+  'Single-Arm Overhead Carry': LOADED_TRAVEL,
+  'Battle Rope Slams': TIME_OR_REPS,
+  'Battle Rope Alternating Waves': TIME_OR_REPS,
+  'Jump Rope': TIME_OR_REPS,
+  'Mountain Climbers': TIME_OR_REPS,
+  'Bear Crawl': { measures: ['distance', 'time'] },
+  'Lateral Shuffles': { measures: ['time', 'distance'] },
 };
 
 const category = (
@@ -52,7 +121,16 @@ const category = (
   name,
   short,
   exercises: (Object.entries(byMeasure) as [Measure, string[]][]).flatMap(
-    ([measure, names]) => names.map(exName => ({ name: exName, measure, category: short }))
+    ([measure, names]) => names.map(exName => {
+      const options = TRACKING_OPTIONS[exName];
+      return {
+        name: exName,
+        measure,
+        measures: options?.measures ?? [measure],
+        distanceUnit: options?.distanceUnit ?? 'yds',
+        category: short,
+      };
+    })
   ),
 });
 
@@ -166,11 +244,25 @@ export const EXERCISE_LIBRARY: Category[] = [
 
 export const ALL_EXERCISES: Exercise[] = EXERCISE_LIBRARY.flatMap(c => c.exercises);
 
-const MEASURE_BY_NAME = new Map(ALL_EXERCISES.map(e => [e.name.toLowerCase(), e.measure]));
+const EXERCISE_BY_NAME = new Map(ALL_EXERCISES.map(e => [e.name.toLowerCase(), e]));
 
-/** Measurement type for an exercise name; custom (typed-in) exercises default to weight × reps. */
-export const getMeasure = (exerciseName: string): Measure =>
-  MEASURE_BY_NAME.get(exerciseName.trim().toLowerCase()) ?? 'weight_reps';
+const ALL_MEASURES = Object.keys(MEASURE_FIELDS) as Measure[];
+
+export type ExerciseInfo = { measures: Measure[]; distanceUnit: DistanceUnit };
+
+/**
+ * Tracking options for an exercise name. Custom (typed-in) exercises can be tracked
+ * any way, defaulting to weight × reps, with distance in yards.
+ */
+export const getExerciseInfo = (exerciseName: string): ExerciseInfo => {
+  const ex = EXERCISE_BY_NAME.get(exerciseName.trim().toLowerCase());
+  return ex
+    ? { measures: ex.measures, distanceUnit: ex.distanceUnit }
+    : { measures: ALL_MEASURES, distanceUnit: 'yds' };
+};
+
+/** Default measurement type for an exercise name. */
+export const getMeasure = (exerciseName: string): Measure => getExerciseInfo(exerciseName).measures[0];
 
 // Abbreviations people commonly type, matched in both directions.
 const SYNONYMS: [string, string][] = [
@@ -179,6 +271,10 @@ const SYNONYMS: [string, string][] = [
   ['rdl', 'romanian'],
   ['trx', 'suspension'],
   ['bw', 'bodyweight'],
+  // A weighted push cart is usually called a sled or prowler.
+  ['prowler', 'sled'],
+  ['cart', 'sled'],
+  ['assault', 'air bike'],
 ];
 
 const tokenVariants = (token: string): string[] => {
@@ -222,7 +318,12 @@ export function searchExercises(query: string): Exercise[] {
   return results.sort((a, b) => b.score - a.score).map(r => r.exercise);
 }
 
-export type StationConfig = { name: string; setsCount: number };
+export type StationConfig = {
+  name: string;
+  setsCount: number;
+  /** Tracking chosen on the setup screen; when absent, use the last-used or default measure. */
+  measure?: Measure;
+};
 
 export const PRESET_ROUTINES: { name: string; exercises: StationConfig[] }[] = [
   {

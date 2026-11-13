@@ -2,12 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Dumbbell, Play, Plus, Check, Clock, Copy,
   Trash2, BarChart2, Flame, Award, ArrowLeft,
-  CheckCircle, Zap, RefreshCw, Layers, ChevronRight
+  CheckCircle, Zap, RefreshCw, Layers, ChevronRight, RotateCcw
 } from 'lucide-react';
 
 import {
-  ALL_EXERCISES, EXERCISE_LIBRARY, FIELD_CONFIG, MEASURE_FIELDS, MEASURE_LABELS, PRESET_ROUTINES,
-  getMeasure, type Field, type Measure, type StationConfig,
+  ALL_EXERCISES, EXERCISE_LIBRARY, MEASURE_FIELDS, MEASURE_LABELS, MEASURE_SHORT, PRESET_ROUTINES,
+  fieldConfig, getExerciseInfo, getMeasure,
+  type DistanceUnit, type Field, type Measure, type StationConfig,
 } from './exercises';
 import { ExercisePicker } from './ExercisePicker';
 
@@ -15,16 +16,21 @@ type WorkoutSet = {
   setNumber: number;
   weight: number;
   reps: number;
-  // Added with time/distance tracking; absent on older saved workouts.
+  // Added with time/distance/calorie tracking; absent on older saved workouts.
   seconds?: number;
   distance?: number;
+  calories?: number;
+  // How this set was tracked when logged, so switching a station's tracking
+  // mid-workout doesn't change how earlier sets read. Absent on older saves.
+  measure?: Measure;
   completed: boolean;
 };
 
 type Station = {
   name: string;
-  // Absent on older saved workouts; resolve with stationMeasure().
+  // Absent on older saved workouts; resolve with stationTracking().
   measure?: Measure;
+  distanceUnit?: DistanceUnit;
   sets: WorkoutSet[];
 };
 
@@ -41,14 +47,22 @@ type View = 'setup' | 'workout' | 'summary' | 'history';
 
 const STORAGE_KEY = 'workout_history';
 
-const stationMeasure = (st: Station): Measure => st.measure ?? getMeasure(st.name);
+/** How a station's sets are measured and displayed. */
+type Tracking = { measure: Measure; unit: DistanceUnit };
+
+const stationTracking = (st: Station): Tracking => ({
+  measure: st.measure ?? getMeasure(st.name),
+  // Before distance units were added, every distance was logged in yards.
+  unit: st.distanceUnit ?? 'yds',
+});
 
 // The values a set carries forward to the next set (everything except number/completion).
-const setValues = (s: Partial<WorkoutSet> = {}) => ({
-  weight: s.weight ?? FIELD_CONFIG.weight.defaultValue,
-  reps: s.reps ?? FIELD_CONFIG.reps.defaultValue,
-  seconds: s.seconds ?? FIELD_CONFIG.seconds.defaultValue,
-  distance: s.distance ?? FIELD_CONFIG.distance.defaultValue,
+const setValues = (s: Partial<WorkoutSet> = {}, unit: DistanceUnit = 'yds') => ({
+  weight: s.weight ?? fieldConfig('weight').defaultValue,
+  reps: s.reps ?? fieldConfig('reps').defaultValue,
+  seconds: s.seconds ?? fieldConfig('seconds').defaultValue,
+  distance: s.distance ?? fieldConfig('distance', unit).defaultValue,
+  calories: s.calories ?? fieldConfig('calories').defaultValue,
 });
 
 const formatDuration = (totalSeconds: number) => {
@@ -58,9 +72,12 @@ const formatDuration = (totalSeconds: number) => {
   return `${m}:${sec < 10 ? '0' : ''}${sec}`;
 };
 
-/** Human-readable set result, e.g. "50 lbs × 10 reps", "45s", "70 lbs × 40 yds". */
-const formatSet = (s: WorkoutSet, measure: Measure, compact = false) => {
-  const v = setValues(s);
+/** Human-readable set result, e.g. "50 lbs × 10 reps", "45s", "500 m", "70 lbs × 40 yds". */
+const formatSet = (s: WorkoutSet, tracking: Tracking, compact = false) => {
+  const measure = s.measure ?? tracking.measure;
+  const unit = tracking.unit;
+  const v = setValues(s, unit);
+  const dist = compact ? `${v.distance}${unit === 'm' ? 'm' : 'yd'}` : `${v.distance} ${unit}`;
   switch (measure) {
     case 'weight_reps':
       return compact ? `${v.weight}×${v.reps}` : `${v.weight} lbs × ${v.reps} reps`;
@@ -69,19 +86,52 @@ const formatSet = (s: WorkoutSet, measure: Measure, compact = false) => {
     case 'time':
       return formatDuration(v.seconds);
     case 'distance':
-      return `${v.distance} yds`;
+      return dist;
+    case 'calories':
+      return `${v.calories} cal`;
     case 'weight_distance':
-      return compact ? `${v.weight}×${v.distance}yd` : `${v.weight} lbs × ${v.distance} yds`;
+      return compact ? `${v.weight}×${dist}` : `${v.weight} lbs × ${dist}`;
+    case 'weight_time':
+      return compact ? `${v.weight}×${formatDuration(v.seconds)}` : `${v.weight} lbs × ${formatDuration(v.seconds)}`;
   }
 };
 
-function Stepper({ field, value, onSet, onStep }: {
+/** Segmented switch for exercises that can be tracked more than one way. */
+function MeasureSwitch({ options, value, onChange }: {
+  options: Measure[];
+  value: Measure;
+  onChange: (measure: Measure) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label="Track by" className="flex gap-1 overflow-x-auto no-scrollbar">
+      {options.map(m => (
+        <button
+          key={m}
+          type="button"
+          role="radio"
+          aria-checked={m === value}
+          onClick={() => onChange(m)}
+          className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
+            m === value
+              ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+              : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+          }`}
+        >
+          {MEASURE_SHORT[m]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Stepper({ field, unit, value, onSet, onStep }: {
   field: Field;
+  unit: DistanceUnit;
   value: number;
   onSet: (value: number) => void;
   onStep: (delta: number) => void;
 }) {
-  const { label, step } = FIELD_CONFIG[field];
+  const { label, step } = fieldConfig(field, unit);
   return (
     <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
       <div className="text-[10px] uppercase font-bold text-slate-400 mb-1">{label}</div>
@@ -153,6 +203,9 @@ export default function App() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingClearAll, setConfirmingClearAll] = useState(false);
 
+  // Date of the past session whose settings are loaded on the setup screen, if any.
+  const [loadedFrom, setLoadedFrom] = useState<string | null>(null);
+
   const saveHistory = (updated: WorkoutLog[]) => {
     setHistory(updated);
     try {
@@ -169,6 +222,19 @@ export default function App() {
     setCopied(false);
     setConfirmingDelete(false);
     setView('summary');
+    window.scrollTo(0, 0);
+  };
+
+  // Load a past session's exercises, set counts and tracking into the setup screen.
+  // Starting weights/reps still come from the most recent time each exercise was done.
+  const loadSessionSettings = (workout: WorkoutLog) => {
+    setStationConfigs(workout.stations.map(st => ({
+      name: st.name,
+      setsCount: Math.max(1, Math.min(10, st.sets.length)),
+      measure: stationTracking(st).measure,
+    })));
+    setLoadedFrom(`${workout.date} • ${workout.time}`);
+    setView('setup');
     window.scrollTo(0, 0);
   };
 
@@ -217,17 +283,28 @@ export default function App() {
       const found = workout.stations.find(s => s.name.toLowerCase() === exerciseName.toLowerCase());
       if (found && found.sets.length > 0) {
         const lastSet = found.sets[found.sets.length - 1];
-        return { date: workout.date, set: lastSet, measure: stationMeasure(found) };
+        return { date: workout.date, set: lastSet, tracking: stationTracking(found) };
       }
     }
     return null;
   };
 
   // Start Workout Initialization with Independent Per-Station Set Counts
+  // How a setup station will be tracked: the choice made on its switch, else what was
+  // used last time for this exercise, else the library default.
+  const resolveMeasure = (config: StationConfig): Measure => {
+    const { measures } = getExerciseInfo(config.name);
+    if (config.measure && measures.includes(config.measure)) return config.measure;
+    const lastUsed = getPreviousHistory(config.name)?.tracking.measure;
+    if (lastUsed && measures.includes(lastUsed)) return lastUsed;
+    return measures[0];
+  };
+
   const handleStartWorkout = () => {
     const initialized = stationConfigs.map(config => {
       const prev = getPreviousHistory(config.name);
-      const initial = setValues(prev?.set);
+      const { distanceUnit } = getExerciseInfo(config.name);
+      const initial = setValues(prev?.set, distanceUnit);
       const count = config.setsCount || 3;
       
       const sets = Array.from({ length: count }, (_, i) => ({
@@ -238,13 +315,15 @@ export default function App() {
 
       return {
         name: config.name,
-        measure: getMeasure(config.name),
+        measure: resolveMeasure(config),
+        distanceUnit,
         sets
       };
     });
 
     setActiveWorkout(initialized);
     setActiveStationIndex(0);
+    setLoadedFrom(null);
     setView('workout');
   };
 
@@ -252,7 +331,26 @@ export default function App() {
   const updateStationName = (index: number, name: string) => {
     setStationConfigs(prev => {
       const updated = [...prev];
-      updated[index] = { ...updated[index], name };
+      // A different exercise gets its own default / last-used tracking.
+      updated[index] = { ...updated[index], name, measure: undefined };
+      return updated;
+    });
+  };
+
+  // Choose how a setup station is tracked
+  const updateStationMeasure = (index: number, measure: Measure) => {
+    setStationConfigs(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], measure };
+      return updated;
+    });
+  };
+
+  // Switch how a station is tracked during the workout (set values are kept)
+  const setActiveStationMeasure = (stationIdx: number, measure: Measure) => {
+    setActiveWorkout(prev => {
+      const updated = [...prev];
+      updated[stationIdx] = { ...updated[stationIdx], measure };
       return updated;
     });
   };
@@ -344,6 +442,7 @@ export default function App() {
 
       const newlyCompleted = !target.completed;
       target.completed = newlyCompleted;
+      target.measure = newlyCompleted ? stationTracking(station).measure : undefined;
       sets[setIdx] = target;
 
       if (newlyCompleted && setIdx < sets.length - 1 && !sets[setIdx + 1].completed) {
@@ -374,6 +473,7 @@ export default function App() {
       sets[setIdx] = {
         ...sets[setIdx],
         ...setValues(prevSet),
+        measure: stationTracking(station).measure,
         completed: true
       };
 
@@ -390,10 +490,10 @@ export default function App() {
     let totalCompletedSets = 0;
 
     activeWorkout.forEach(st => {
-      const countsTowardVolume = stationMeasure(st) === 'weight_reps';
+      const stationMeasure = stationTracking(st).measure;
       st.sets.forEach(s => {
         if (s.completed) {
-          if (countsTowardVolume) {
+          if ((s.measure ?? stationMeasure) === 'weight_reps') {
             totalVolume += (Number(s.weight) || 0) * (Number(s.reps) || 0);
           }
           totalCompletedSets += 1;
@@ -423,7 +523,7 @@ export default function App() {
       text += `Station ${idx + 1}: ${st.name}\n`;
       st.sets.forEach(s => {
         if (s.completed) {
-          text += `  • Set ${s.setNumber}: ${formatSet(s, stationMeasure(st))}\n`;
+          text += `  • Set ${s.setNumber}: ${formatSet(s, stationTracking(st))}\n`;
         }
       });
     });
@@ -490,10 +590,21 @@ export default function App() {
           <div className="mb-3">
             <div className="text-xs text-slate-400 mb-2 font-medium">Quick Preset Templates:</div>
             <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {history.length > 0 && (
+                <button
+                  onClick={() => loadSessionSettings(history[0])}
+                  className="whitespace-nowrap px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-xs font-semibold text-amber-400 transition-colors flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Last Session
+                </button>
+              )}
               {PRESET_ROUTINES.map((routine, idx) => (
                 <button
                   key={idx}
-                  onClick={() => setStationConfigs(routine.exercises.map(ex => ({ ...ex })))}
+                  onClick={() => {
+                    setStationConfigs(routine.exercises.map(ex => ({ ...ex })));
+                    setLoadedFrom(null);
+                  }}
                   className="whitespace-nowrap px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-medium text-amber-400 hover:text-amber-300 transition-colors"
                 >
                   {routine.name}
@@ -501,6 +612,22 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          {loadedFrom && (
+            <div className="mb-4 -mt-1 flex items-center justify-between gap-2 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 text-[11px] text-amber-200">
+              <span className="flex items-center gap-1.5">
+                <RotateCcw className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                Loaded from your {loadedFrom} session. Adjust anything, then start.
+              </span>
+              <button
+                onClick={() => setLoadedFrom(null)}
+                aria-label="Dismiss"
+                className="text-amber-400/70 hover:text-amber-300 text-sm leading-none px-1"
+              >
+                ×
+              </button>
+            </div>
+          )}
 
           {/* Category Quick Filter */}
           <div className="mb-4">
@@ -530,6 +657,7 @@ export default function App() {
           <div className="space-y-3">
             {stationConfigs.map((config, index) => {
               const lastStat = getPreviousHistory(config.name);
+              const measureOptions = getExerciseInfo(config.name).measures;
               const chipOptions = getExercisesForCategory(activeCategoryFilter, index);
 
               return (
@@ -568,9 +696,22 @@ export default function App() {
                   />
 
                   <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-400">
-                    <span>{lastStat ? `Last: ${formatSet(lastStat.set, lastStat.measure)}` : ''}</span>
-                    <span className="text-slate-500">Tracks {MEASURE_LABELS[getMeasure(config.name)]}</span>
+                    <span>{lastStat ? `Last: ${formatSet(lastStat.set, lastStat.tracking)}` : ''}</span>
+                    {measureOptions.length === 1 && (
+                      <span className="text-slate-500">Tracks {MEASURE_LABELS[measureOptions[0]]}</span>
+                    )}
                   </div>
+
+                  {measureOptions.length > 1 && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="shrink-0 text-[10px] uppercase font-bold text-slate-500">Track by</span>
+                      <MeasureSwitch
+                        options={measureOptions}
+                        value={resolveMeasure(config)}
+                        onChange={(m) => updateStationMeasure(index, m)}
+                      />
+                    </div>
+                  )}
 
                   {/* Quick Select Chips from Movement Library */}
                   <div className="flex gap-1.5 overflow-x-auto mt-2 pt-0.5 no-scrollbar">
@@ -608,8 +749,10 @@ export default function App() {
   if (view === 'workout') {
     const currentStation = activeWorkout[activeStationIndex];
     const previous = getPreviousHistory(currentStation.name);
-    const currentMeasure = stationMeasure(currentStation);
+    const currentTracking = stationTracking(currentStation);
+    const currentMeasure = currentTracking.measure;
     const currentFields = MEASURE_FIELDS[currentMeasure];
+    const currentOptions = getExerciseInfo(currentStation.name).measures;
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between max-w-md mx-auto p-4 border-x border-slate-900 font-sans relative">
@@ -687,17 +830,30 @@ export default function App() {
               <div className="text-xs font-bold uppercase tracking-wider text-amber-400">
                 Station {activeStationIndex + 1} ({currentStation.sets.length} Sets Scheduled)
               </div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                {MEASURE_LABELS[currentMeasure]}
-              </div>
+              {currentOptions.length === 1 && (
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  {MEASURE_LABELS[currentMeasure]}
+                </div>
+              )}
             </div>
             <h2 className="text-xl font-bold text-white tracking-wide mb-1">{currentStation.name}</h2>
+
+            {currentOptions.length > 1 && (
+              <div className="mt-2 flex items-center gap-2">
+                <span className="shrink-0 text-[10px] uppercase font-bold text-slate-500">Track by</span>
+                <MeasureSwitch
+                  options={currentOptions}
+                  value={currentMeasure}
+                  onChange={(m) => setActiveStationMeasure(activeStationIndex, m)}
+                />
+              </div>
+            )}
             
             {/* Last Known Performance Reference */}
             {previous && (
               <div className="text-xs text-slate-400 mt-2 flex items-center gap-1 bg-slate-950/60 p-2 rounded-xl border border-slate-800/80">
                 <Flame className="w-3.5 h-3.5 text-amber-400" />
-                <span>PR / Last Session: <strong className="text-slate-200">{formatSet(previous.set, previous.measure)}</strong></span>
+                <span>PR / Last Session: <strong className="text-slate-200">{formatSet(previous.set, previous.tracking)}</strong></span>
               </div>
             )}
           </div>
@@ -751,7 +907,8 @@ export default function App() {
                     <Stepper
                       key={field}
                       field={field}
-                      value={set[field] ?? FIELD_CONFIG[field].defaultValue}
+                      unit={currentTracking.unit}
+                      value={set[field] ?? fieldConfig(field, currentTracking.unit).defaultValue}
                       onSet={(v) => updateSet(activeStationIndex, setIdx, field, v)}
                       onStep={(d) => updateSet(activeStationIndex, setIdx, field, d, true)}
                     />
@@ -898,7 +1055,7 @@ export default function App() {
                   <div className="flex flex-wrap gap-2 mt-1">
                     {st.sets.filter(s => s.completed).map((s, idx) => (
                       <span key={idx} className="text-[11px] bg-slate-950 border border-slate-800 px-2 py-0.5 rounded-md text-slate-300">
-                        {formatSet(s, stationMeasure(st))}
+                        {formatSet(s, stationTracking(st))}
                       </span>
                     ))}
                   </div>
@@ -906,6 +1063,15 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          {/* Repeat: load this session's settings into a new session */}
+          <button
+            onClick={() => loadSessionSettings(latest)}
+            className="w-full mb-3 py-3.5 rounded-2xl font-bold text-xs tracking-wider uppercase flex items-center justify-center space-x-2 border bg-amber-500/10 border-amber-500/40 text-amber-400 hover:bg-amber-500/20 transition-all"
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span>REPEAT THIS WORKOUT</span>
+          </button>
 
           {/* Copy Summary Button */}
           <button
@@ -1010,7 +1176,7 @@ export default function App() {
                       <div key={i} className="text-xs flex justify-between text-slate-300">
                         <span className="font-medium text-slate-400">S{i+1}: {st.name}</span>
                         <span className="font-bold">
-                          {st.sets.filter(s => s.completed).map(s => formatSet(s, stationMeasure(st), true)).join(', ')}
+                          {st.sets.filter(s => s.completed).map(s => formatSet(s, stationTracking(st), true)).join(', ')}
                         </span>
                       </div>
                     ))}

@@ -3,3 +3,11 @@
 body {
   @apply bg-slate-950;
 }
+
+/* Horizontal chip rows scroll by swipe without showing a scrollbar */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
