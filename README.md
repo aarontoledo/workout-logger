@@ -1,32 +1,42 @@
-# React + TypeScript + Vite
+# Workout Logger
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A mobile-first app for logging 6-station strength sessions: pick an exercise per station, log sets with a rest timer, and review past workouts.
 
-Currently, two official plugins are available:
+Live at **https://workout-logger.aarontoledo.com**
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
 
-## React Compiler
+- **156-exercise library** in 13 movement-pattern categories, with search that understands abbreviations (DB, KB, RDL) and nicknames ("cart"/"prowler" → sled)
+- **Tracking per exercise**: weight × reps, reps, time, distance, calories, weight × distance, or weight × time. Some exercises can switch (e.g. bike by time, distance, or calories), and the app remembers your last choice
+- **Units that match the equipment**: yards for sleds and carries, meters for rower/SkiErg, miles for air bike and treadmill
+- **Rest timer**, presets, and repeating any past session (or "Last Session")
+- **History** with full summaries, copy-to-clipboard, and per-workout delete
+- **Backup & transfer**: export/import history as a JSON file, or share one workout as a link
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+History is stored in the browser's `localStorage` (key `workout_history`); there is no server-side storage. On iPhone, add the app to the Home Screen: Safari may clear data for sites in a regular tab that go unvisited for 7 days.
 
-## Expanding the Oxlint configuration
+## Development
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev          # http://localhost:5173
+npm run dev -- --host  # also reachable from a phone on the same Wi-Fi
+npm run build        # type-check + production build
+npm run preview      # build and serve the production version
+npm run lint
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Deployment
+
+Hosted on Cloudflare Workers as a static single-page app ([wrangler.jsonc](wrangler.jsonc)). Every push to `main` deploys automatically through Cloudflare Workers Builds (build: `npm run build`, deploy: `npx wrangler deploy`). To deploy manually: `npm run deploy`.
+
+## Project layout
+
+| Path | Purpose |
+|---|---|
+| `src/App.tsx` | Screens (setup, workout, summary, history) and app state |
+| `src/exercises.ts` | Exercise library, tracking types, units, presets, search |
+| `src/ExercisePicker.tsx` | Exercise search dropdown (replaces `<datalist>`, which iOS handles poorly) |
+| `src/transfer.ts` | Backup export/import and share-link encoding |
+| `src/types.ts` | Saved workout data types |
+| `worker/` | Worker entry point, currently unused. Kept for a future sync API (`main` is not set in `wrangler.jsonc`) |
