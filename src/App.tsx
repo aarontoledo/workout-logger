@@ -204,6 +204,13 @@ export default function App() {
     setIsTimerRunning(true);
   };
 
+  // Skip Rest Timer: clear the remaining time so the timer bar disappears
+  // (the bar is shown whenever timerSeconds > 0; stopping alone would freeze it).
+  const skipRestTimer = () => {
+    setIsTimerRunning(false);
+    setTimerSeconds(0);
+  };
+
   // Helper to get previous stats for exercise from history
   const getPreviousHistory = (exerciseName: string) => {
     for (let workout of history) {
@@ -327,6 +334,8 @@ export default function App() {
 
   // Toggle Set Complete
   const toggleSetComplete = (stationIdx: number, setIdx: number) => {
+    const wasCompleted = activeWorkout[stationIdx]?.sets[setIdx]?.completed;
+
     setActiveWorkout(prev => {
       const updated = [...prev];
       const station = { ...updated[stationIdx] };
@@ -349,7 +358,8 @@ export default function App() {
       return updated;
     });
 
-    startRestTimer(60);
+    // Only rest after completing a set, not when un-checking one.
+    if (!wasCompleted) startRestTimer(60);
   };
 
   // Fast set duplicate action
@@ -615,7 +625,7 @@ export default function App() {
               {Math.floor(timerSeconds / 60)}:{timerSeconds % 60 < 10 ? '0' : ''}{timerSeconds % 60}
             </div>
             <button 
-              onClick={() => setIsTimerRunning(false)}
+              onClick={skipRestTimer}
               className="text-xs bg-slate-950/20 hover:bg-slate-950/40 px-2 py-1 rounded-lg font-bold"
             >
               SKIP
