@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Dumbbell, Play, Plus, Check, Clock, Copy,
   Trash2, BarChart2, Flame, Award, ArrowLeft,
-  CheckCircle, Zap, RefreshCw, Layers, ChevronRight, RotateCcw
+  CheckCircle, Zap, RefreshCw, Layers, ChevronRight, RotateCcw,
+  Download, Upload, Share2, BookmarkPlus, X
 } from 'lucide-react';
 
 import {
@@ -11,39 +12,15 @@ import {
   type DistanceUnit, type Field, type Measure, type StationConfig,
 } from './exercises';
 import { ExercisePicker } from './ExercisePicker';
+import {
+  SHARE_HASH_PREFIX, buildShareUrl, decodeWorkout, exportHistory, mergeWorkouts, parseBackup, shareLink,
+} from './transfer';
+import type { Station, WorkoutLog, WorkoutSet } from './types';
 
-type WorkoutSet = {
-  setNumber: number;
-  weight: number;
-  reps: number;
-  // Added with time/distance/calorie tracking; absent on older saved workouts.
-  seconds?: number;
-  distance?: number;
-  calories?: number;
-  // How this set was tracked when logged, so switching a station's tracking
-  // mid-workout doesn't change how earlier sets read. Absent on older saves.
-  measure?: Measure;
-  completed: boolean;
-};
+type View = 'setup' | 'workout' | 'summary' | 'history' | 'shared';
 
-type Station = {
-  name: string;
-  // Absent on older saved workouts; resolve with stationTracking().
-  measure?: Measure;
-  distanceUnit?: DistanceUnit;
-  sets: WorkoutSet[];
-};
-
-type WorkoutLog = {
-  id: number;
-  date: string;
-  time: string;
-  totalVolume: number;
-  totalCompletedSets: number;
-  stations: Station[];
-};
-
-type View = 'setup' | 'workout' | 'summary' | 'history';
+// `view` is the screen the message belongs to, so it doesn't follow you elsewhere.
+type Notice = { kind: 'ok' | 'error'; text: string; view: View };
 
 const STORAGE_KEY = 'workout_history';
 
@@ -217,6 +194,56 @@ export default function App() {
   // Date of the past session whose settings are loaded on the setup screen, if any.
   const [loadedFrom, setLoadedFrom] = useState<string | null>(null);
 
+  // A workout opened from someone's share link (not necessarily in this device's history).
+  const [sharedWorkout, setSharedWorkout] = useState<WorkoutLog | null>(null);
+  // Status message for import/export/share-link results.
+  const [notice, setNotice] = useState<Notice | null>(null);
+  // Share link for the workout on the summary screen, prepared ahead of the tap
+  // because iOS only opens the share sheet if it's called during the tap itself.
+  const [shareUrl, setShareUrl] = useState<{ id: number; url: string } | null>(null);
+  const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared'>('idle');
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  const summaryWorkout =
+    view === 'summary' ? history.find(h => h.id === summaryId)
+    : view === 'shared' ? sharedWorkout ?? undefined
+    : undefined;
+
+  useEffect(() => {
+    if (!summaryWorkout) return;
+    let cancelled = false;
+    buildShareUrl(summaryWorkout).then(url => {
+      if (!cancelled) setShareUrl({ id: summaryWorkout.id, url });
+    });
+    return () => { cancelled = true; };
+  }, [summaryWorkout]);
+
+  // Open a shared workout when the app is loaded from a share link.
+  useEffect(() => {
+    const openFromHash = () => {
+      if (!window.location.hash.startsWith(SHARE_HASH_PREFIX)) return;
+      const payload = window.location.hash.slice(SHARE_HASH_PREFIX.length);
+      // Drop the hash so a refresh or back navigation doesn't reopen it.
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      decodeWorkout(payload)
+        .then(workout => {
+          setSharedWorkout(workout);
+          setShareStatus('idle');
+          setCopied(false);
+          setView('shared');
+          window.scrollTo(0, 0);
+        })
+        .catch(() => setNotice({
+          kind: 'error',
+          view: 'setup',
+          text: "That shared workout link couldn't be opened. It may have been cut off; ask for it to be sent again.",
+        }));
+    };
+    openFromHash();
+    window.addEventListener('hashchange', openFromHash);
+    return () => window.removeEventListener('hashchange', openFromHash);
+  }, []);
+
   const saveHistory = (updated: WorkoutLog[]) => {
     setHistory(updated);
     try {
@@ -231,6 +258,7 @@ export default function App() {
     setSummaryId(id);
     setSummaryOrigin(origin);
     setCopied(false);
+    setShareStatus('idle');
     setConfirmingDelete(false);
     setView('summary');
     window.scrollTo(0, 0);
@@ -247,6 +275,48 @@ export default function App() {
     setLoadedFrom(`${workout.date} • ${workout.time}`);
     setView('setup');
     window.scrollTo(0, 0);
+  };
+
+  const handleExport = async () => {
+    setNotice(null);
+    const result = await exportHistory(history);
+    const count = `${history.length} workout${history.length === 1 ? '' : 's'}`;
+    if (result === 'downloaded') setNotice({ kind: 'ok', view: 'history', text: `Backup of ${count} saved to your Downloads.` });
+    if (result === 'shared') setNotice({ kind: 'ok', view: 'history', text: `Backup of ${count} exported.` });
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow picking the same file again
+    if (!file) return;
+    try {
+      const incoming = parseBackup(await file.text());
+      const { merged, added, skipped } = mergeWorkouts(history, incoming);
+      if (added > 0) saveHistory(merged);
+      setNotice({
+        kind: 'ok',
+        view: 'history',
+        text: added === 0
+          ? `No new workouts: all ${skipped} in that file are already here.`
+          : `Imported ${added} workout${added === 1 ? '' : 's'}${skipped ? ` (${skipped} already here)` : ''}.`,
+      });
+    } catch (err) {
+      setNotice({ kind: 'error', view: 'history', text: (err as Error).message });
+    }
+  };
+
+  const handleShareWorkout = async (workout: WorkoutLog) => {
+    if (shareUrl?.id !== workout.id) return;
+    const result = await shareLink(shareUrl.url, `Workout: ${workout.date}`);
+    if (result !== 'cancelled') {
+      setShareStatus(result);
+      setTimeout(() => setShareStatus('idle'), 2500);
+    }
+  };
+
+  const saveSharedWorkout = (workout: WorkoutLog) => {
+    const { merged, added } = mergeWorkouts(history, [workout]);
+    if (added > 0) saveHistory(merged);
   };
 
   const deleteWorkout = (id: number) => {
@@ -578,6 +648,22 @@ export default function App() {
               <BarChart2 className="w-5 h-5" />
             </button>
           </div>
+
+          {notice?.view === view && (
+            <div
+              role="status"
+              className={`mb-4 flex items-start justify-between gap-2 rounded-xl px-3 py-2 text-[11px] border ${
+                notice.kind === 'ok'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                  : 'bg-red-950/40 border-red-500/30 text-red-200'
+              }`}
+            >
+              <span>{notice.text}</span>
+              <button onClick={() => setNotice(null)} aria-label="Dismiss" className="opacity-70 hover:opacity-100">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Quick Global Set Preset bar */}
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 my-4 flex items-center justify-between">
@@ -1008,22 +1094,24 @@ export default function App() {
     );
   }
 
-  const summaryEntry = view === 'summary' ? history.find(h => h.id === summaryId) : undefined;
-
-  if (view === 'summary' && summaryEntry) {
-    const latest = summaryEntry;
-    const fromHistory = summaryOrigin === 'history';
+  if ((view === 'summary' || view === 'shared') && summaryWorkout) {
+    const latest = summaryWorkout;
+    const isShared = view === 'shared';
+    const fromHistory = !isShared && summaryOrigin === 'history';
+    const sharedSaved = isShared && history.some(h => h.id === latest.id);
+    const shareReady = shareUrl?.id === latest.id;
+    const leaveShared = () => { setSharedWorkout(null); setView('setup'); };
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between max-w-md mx-auto p-4 border-x border-slate-900 font-sans">
         <div>
-          {fromHistory && (
+          {(fromHistory || isShared) && (
             <div className="flex items-center justify-between my-3">
               <button
-                onClick={() => setView('history')}
+                onClick={() => (isShared ? leaveShared() : setView('history'))}
                 className="text-slate-400 hover:text-white flex items-center text-xs font-semibold"
               >
-                <ArrowLeft className="w-4 h-4 mr-1" /> History
+                <ArrowLeft className="w-4 h-4 mr-1" /> {isShared ? 'Home' : 'History'}
               </button>
             </div>
           )}
@@ -1034,7 +1122,7 @@ export default function App() {
               <Award className="w-8 h-8" />
             </div>
             <h1 className="text-2xl font-black tracking-tight text-white">
-              {fromHistory ? 'WORKOUT SUMMARY' : 'WORKOUT COMPLETE!'}
+              {isShared ? 'SHARED WORKOUT' : fromHistory ? 'WORKOUT SUMMARY' : 'WORKOUT COMPLETE!'}
             </h1>
             <p className="text-xs text-slate-400">{latest?.date} • {latest?.time}</p>
           </div>
@@ -1085,6 +1173,22 @@ export default function App() {
             <span>REPEAT THIS WORKOUT</span>
           </button>
 
+          {/* Shared workouts: save a copy into this device's history */}
+          {isShared && (
+            <button
+              onClick={() => saveSharedWorkout(latest)}
+              disabled={sharedSaved}
+              className={`w-full mb-3 py-3.5 rounded-2xl font-bold text-xs tracking-wider uppercase flex items-center justify-center space-x-2 border transition-all ${
+                sharedSaved
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                  : 'bg-slate-900 border-slate-800 text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              {sharedSaved ? <Check className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4 text-amber-400" />}
+              <span>{sharedSaved ? 'SAVED TO YOUR HISTORY' : 'SAVE TO MY HISTORY'}</span>
+            </button>
+          )}
+
           {/* Copy Summary Button */}
           <button
             onClick={() => copySummaryToClipboard(latest)}
@@ -1098,8 +1202,24 @@ export default function App() {
             <span>{copied ? "COPIED TO CLIPBOARD!" : "COPY WORKOUT SUMMARY"}</span>
           </button>
 
+          {/* Share a link that opens this workout in the app */}
+          <button
+            onClick={() => handleShareWorkout(latest)}
+            disabled={!shareReady}
+            className={`w-full mt-3 py-3.5 rounded-2xl font-bold text-xs tracking-wider uppercase transition-all flex items-center justify-center space-x-2 border disabled:opacity-50 ${
+              shareStatus !== 'idle'
+                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+                : 'bg-slate-900 border-slate-800 text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            {shareStatus !== 'idle' ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4 text-amber-400" />}
+            <span>
+              {shareStatus === 'copied' ? 'LINK COPIED!' : shareStatus === 'shared' ? 'SHARED!' : 'SHARE WORKOUT LINK'}
+            </span>
+          </button>
+
           {/* Delete this workout, with in-app confirmation */}
-          {confirmingDelete ? (
+          {isShared ? null : confirmingDelete ? (
             <div className="mt-4 bg-red-950/30 border border-red-500/30 rounded-2xl p-3">
               <p className="text-xs text-red-200 text-center mb-3">Delete this workout? This can't be undone.</p>
               <div className="grid grid-cols-2 gap-2">
@@ -1130,10 +1250,10 @@ export default function App() {
         {/* Back Button */}
         <div className="py-4">
           <button
-            onClick={() => setView(fromHistory ? 'history' : 'setup')}
+            onClick={() => (isShared ? leaveShared() : setView(fromHistory ? 'history' : 'setup'))}
             className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-4 rounded-2xl text-sm shadow-lg shadow-amber-500/20"
           >
-            {fromHistory ? 'BACK TO HISTORY' : 'DONE & RETURN HOME'}
+            {isShared ? 'GO TO HOME' : fromHistory ? 'BACK TO HISTORY' : 'DONE & RETURN HOME'}
           </button>
         </div>
       </div>
@@ -1141,7 +1261,7 @@ export default function App() {
   }
 
   // History (also the fallback if the summary's workout no longer exists)
-  if (view === 'history' || view === 'summary') {
+  if (view === 'history' || view === 'summary' || view === 'shared') {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between max-w-md mx-auto p-4 border-x border-slate-900 font-sans">
         <div>
@@ -1156,6 +1276,23 @@ export default function App() {
             <h1 className="text-base font-bold text-white">Workout History</h1>
             <div className="w-8"></div>
           </div>
+
+          {notice?.view === view && (
+            <div
+              role="status"
+              className={`mb-4 flex items-start justify-between gap-2 rounded-xl px-3 py-2 text-[11px] border ${
+                notice.kind === 'ok'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                  : 'bg-red-950/40 border-red-500/30 text-red-200'
+              }`}
+            >
+              <span>{notice.text}</span>
+              <button onClick={() => setNotice(null)} aria-label="Dismiss" className="opacity-70 hover:opacity-100">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
 
           {history.length === 0 ? (
             <div className="text-center py-16 text-slate-500">
@@ -1203,9 +1340,40 @@ export default function App() {
           )}
         </div>
 
+        <div className="py-4 space-y-3">
+          {/* Backup & transfer between devices */}
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Backup & Transfer</div>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Export a backup file, or import one to bring your history to this device. Imports add to what's here and skip duplicates.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={handleExport}
+                disabled={history.length === 0}
+                className="py-2.5 rounded-xl text-xs font-bold bg-slate-950 border border-slate-800 text-slate-200 hover:bg-slate-800 disabled:opacity-40 flex items-center justify-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5 text-amber-400" /> EXPORT
+              </button>
+              <button
+                onClick={() => importInputRef.current?.click()}
+                className="py-2.5 rounded-xl text-xs font-bold bg-slate-950 border border-slate-800 text-slate-200 hover:bg-slate-800 flex items-center justify-center gap-1.5"
+              >
+                <Upload className="w-3.5 h-3.5 text-amber-400" /> IMPORT
+              </button>
+            </div>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={handleImportFile}
+              hidden
+            />
+          </div>
+
         {/* Clear History Option */}
         {history.length > 0 && (
-          <div className="py-4">
+          <div>
             {confirmingClearAll ? (
               <div className="bg-red-950/30 border border-red-500/30 rounded-2xl p-3">
                 <p className="text-xs text-red-200 text-center mb-3">
@@ -1236,6 +1404,7 @@ export default function App() {
             )}
           </div>
         )}
+        </div>
       </div>
     );
   }
