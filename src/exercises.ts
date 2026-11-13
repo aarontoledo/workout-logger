@@ -14,7 +14,7 @@ export type Measure =
 
 export type Field = 'weight' | 'reps' | 'seconds' | 'distance' | 'calories';
 
-export type DistanceUnit = 'yds' | 'm';
+export type DistanceUnit = 'yds' | 'm' | 'mi';
 
 export const MEASURE_FIELDS: Record<Measure, Field[]> = {
   weight_reps: ['weight', 'reps'],
@@ -59,6 +59,7 @@ const FIELD_SETTINGS: Record<Exclude<Field, 'distance'>, FieldSettings> = {
 const DISTANCE_SETTINGS: Record<DistanceUnit, FieldSettings> = {
   yds: { label: 'Distance (yds)', step: 5, defaultValue: 20 },
   m: { label: 'Distance (m)', step: 50, defaultValue: 500 },
+  mi: { label: 'Distance (mi)', step: 0.1, defaultValue: 0.5 },
 };
 
 /** Label, stepper increment and starting value for an input field. */
@@ -86,15 +87,17 @@ export type Category = {
 // Exercises that can be tracked more than one way. The first measure must match
 // the group the exercise is listed under in EXERCISE_LIBRARY (its default).
 type TrackingOptions = { measures: Measure[]; distanceUnit?: DistanceUnit };
-const MACHINE: TrackingOptions = { measures: ['time', 'distance', 'calories'], distanceUnit: 'm' };
+// Units match each machine's display: Concept2 rower/SkiErg show meters; US air bikes and treadmills show miles.
+const METERS_MACHINE: TrackingOptions = { measures: ['time', 'distance', 'calories'], distanceUnit: 'm' };
+const MILES_MACHINE: TrackingOptions = { measures: ['time', 'distance', 'calories'], distanceUnit: 'mi' };
 const LOADED_TRAVEL: TrackingOptions = { measures: ['weight_distance', 'weight_time'] };
 const TIME_OR_REPS: TrackingOptions = { measures: ['time', 'reps'] };
 
 const TRACKING_OPTIONS: Record<string, TrackingOptions> = {
-  'SkiErg Sprint': MACHINE,
-  'Rowing Ergometer Sprint': MACHINE,
-  'Air Bike Sprint': MACHINE,
-  'Treadmill Sprint': MACHINE,
+  'SkiErg Sprint': METERS_MACHINE,
+  'Rowing Ergometer Sprint': METERS_MACHINE,
+  'Air Bike Sprint': MILES_MACHINE,
+  'Treadmill Sprint': MILES_MACHINE,
   'Sled Push': LOADED_TRAVEL,
   'Sled Drag (Backward)': LOADED_TRAVEL,
   'Sled Row': LOADED_TRAVEL,

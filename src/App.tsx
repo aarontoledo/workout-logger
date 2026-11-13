@@ -77,7 +77,7 @@ const formatSet = (s: WorkoutSet, tracking: Tracking, compact = false) => {
   const measure = s.measure ?? tracking.measure;
   const unit = tracking.unit;
   const v = setValues(s, unit);
-  const dist = compact ? `${v.distance}${unit === 'm' ? 'm' : 'yd'}` : `${v.distance} ${unit}`;
+  const dist = compact ? `${v.distance}${unit === 'yds' ? 'yd' : unit}` : `${v.distance} ${unit}`;
   switch (measure) {
     case 'weight_reps':
       return compact ? `${v.weight}×${v.reps}` : `${v.weight} lbs × ${v.reps} reps`;
@@ -132,26 +132,37 @@ function Stepper({ field, unit, value, onSet, onStep }: {
   onStep: (delta: number) => void;
 }) {
   const { label, step } = fieldConfig(field, unit);
+  // While editing, keep the raw text so partial decimals like "0." aren't wiped out.
+  const [draft, setDraft] = useState<string | null>(null);
+  const allowsDecimal = !Number.isInteger(step) || field === 'weight';
   return (
     <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
       <div className="text-[10px] uppercase font-bold text-slate-400 mb-1">{label}</div>
       <div className="flex items-center justify-between">
         <input
-          type="number"
-          inputMode="numeric"
-          value={value}
-          onChange={(e) => onSet(Number(e.target.value))}
+          type="text"
+          inputMode={allowsDecimal ? 'decimal' : 'numeric'}
+          value={draft ?? String(value)}
+          onFocus={() => setDraft(String(value))}
+          onBlur={() => setDraft(null)}
+          onChange={(e) => {
+            const text = e.target.value.replace(',', '.');
+            if (!/^\d*\.?\d*$/.test(text)) return; // digits and one decimal point only
+            setDraft(text);
+            const n = parseFloat(text);
+            onSet(Number.isNaN(n) ? 0 : n);
+          }}
           className="w-16 bg-transparent text-xl font-bold text-white focus:outline-none"
         />
         <div className="flex space-x-1">
           <button
-            onClick={() => onStep(-step)}
+            onClick={() => { setDraft(null); onStep(-step); }}
             className="w-8 h-7 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold"
           >
             -{step}
           </button>
           <button
-            onClick={() => onStep(step)}
+            onClick={() => { setDraft(null); onStep(step); }}
             className="w-8 h-7 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold"
           >
             +{step}
@@ -418,7 +429,8 @@ export default function App() {
 
       if (isDelta) {
         const currentVal = Number(currentSet[field]) || 0;
-        currentSet[field] = Math.max(0, currentVal + deltaOrValue);
+        // Round to 2 decimals so 0.1-mile steps show 0.3, not 0.30000000000000004.
+        currentSet[field] = Math.max(0, Math.round((currentVal + deltaOrValue) * 100) / 100);
       } else {
         currentSet[field] = deltaOrValue;
       }
