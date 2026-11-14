@@ -112,6 +112,7 @@ const TRACKING_OPTIONS: Record<string, TrackingOptions> = {
   'Battle Rope Alternating Waves': TIME_OR_REPS,
   'Jump Rope': TIME_OR_REPS,
   'Mountain Climbers': TIME_OR_REPS,
+  'Jumping Jacks': { measures: ['reps', 'time'] },
   'Bear Crawl': { measures: ['distance', 'time'] },
   'Lateral Shuffles': { measures: ['time', 'distance'] },
 };
@@ -212,9 +213,9 @@ export const EXERCISE_LIBRARY: Category[] = [
     weight_reps: [
       'Kettlebell Clean', 'Kettlebell Snatch', 'Slam Ball Rainbows', 'Overhead Slam Ball',
       'Medicine Ball Chest Pass', 'Rotational Med Ball Throw', 'Landmine Rotational Press',
-      'Trap Bar Jump', 'KB High Pull',
+      'Trap Bar Jump', 'KB High Pull', 'DB Snatch (Single-Arm)', 'DB Swing',
     ],
-    reps: ['Skater Jumps', 'Box Jumps', 'Broad Jump', 'Lateral Bound', 'Burpees'],
+    reps: ['Skater Jumps', 'Box Jumps', 'Broad Jump', 'Lateral Bound', 'Burpees', 'Jump Squats'],
     weight_distance: ['Sled Sprint'],
   }),
   category('Carries & Loaded Movement', 'Carries', {
@@ -229,6 +230,7 @@ export const EXERCISE_LIBRARY: Category[] = [
       'Battle Rope Slams', 'Battle Rope Alternating Waves', 'Jump Rope', 'Mountain Climbers',
       'Lateral Shuffles',
     ],
+    reps: ['Jumping Jacks'],
   }),
   category('Arms & Accessories', 'Arms', {
     weight_reps: [
@@ -326,11 +328,19 @@ export type StationConfig = {
   setsCount: number;
   /** Tracking chosen on the setup screen; when absent, use the last-used or default measure. */
   measure?: Measure;
+  /** Starting reps set by a preset (e.g. 5 for a 5x5); when absent, use last time's reps. */
+  reps?: number;
 };
 
-export const PRESET_ROUTINES: { name: string; exercises: StationConfig[] }[] = [
+/** Where a preset is meant to be done: a full gym, or a home gym (dumbbells, bench, ab wheel, battle ropes). */
+export type PresetLocation = 'gym' | 'home';
+
+export type PresetRoutine = { name: string; location: PresetLocation; exercises: StationConfig[] };
+
+export const PRESET_ROUTINES: PresetRoutine[] = [
   {
     name: 'Full Body Balance',
+    location: 'gym',
     exercises: [
       { name: 'Trap Bar Deadlift', setsCount: 4 },
       { name: 'DB Bench Press', setsCount: 4 },
@@ -342,6 +352,7 @@ export const PRESET_ROUTINES: { name: string; exercises: StationConfig[] }[] = [
   },
   {
     name: 'Lower Body Focus',
+    location: 'gym',
     exercises: [
       { name: 'Trap Bar Squat', setsCount: 4 },
       { name: 'Single-Leg RDL', setsCount: 3 },
@@ -353,6 +364,7 @@ export const PRESET_ROUTINES: { name: string; exercises: StationConfig[] }[] = [
   },
   {
     name: 'Upper Body Focus',
+    location: 'gym',
     exercises: [
       { name: 'DB Incline Press', setsCount: 4 },
       { name: 'TRX Inverted Row', setsCount: 4 },
@@ -364,6 +376,7 @@ export const PRESET_ROUTINES: { name: string; exercises: StationConfig[] }[] = [
   },
   {
     name: 'Strength & Conditioning',
+    location: 'gym',
     exercises: [
       { name: 'Trap Bar Deadlift', setsCount: 4 },
       { name: 'Half-Kneeling Landmine Press', setsCount: 3 },
@@ -375,6 +388,7 @@ export const PRESET_ROUTINES: { name: string; exercises: StationConfig[] }[] = [
   },
   {
     name: 'Core & Carry',
+    location: 'gym',
     exercises: [
       { name: 'KB Front Squat', setsCount: 3 },
       { name: 'Deadbug', setsCount: 3 },
@@ -382,6 +396,80 @@ export const PRESET_ROUTINES: { name: string; exercises: StationConfig[] }[] = [
       { name: 'Side Plank', setsCount: 3 },
       { name: "Farmer's Walk", setsCount: 3 },
       { name: 'Hollow Body Hold', setsCount: 3 },
+    ],
+  },
+  // Home gym: adjustable dumbbells, adjustable (FID) bench, ab wheel, battle ropes.
+  {
+    name: 'Full Body A',
+    location: 'home',
+    exercises: [
+      { name: 'DB Incline Press', setsCount: 4 },
+      { name: 'DB Romanian Deadlift (RDL)', setsCount: 4 },
+      { name: 'Chest-Supported Row', setsCount: 4 },
+      { name: 'DB Goblet Squat', setsCount: 3 },
+      { name: 'Ab Wheel Rollout', setsCount: 3 },
+      { name: 'Battle Rope Alternating Waves', setsCount: 3, measure: 'time' },
+    ],
+  },
+  {
+    name: 'Full Body B',
+    location: 'home',
+    exercises: [
+      { name: 'DB Bench Press', setsCount: 4 },
+      { name: 'DB Rear-Foot Elevated Split Squat', setsCount: 3 },
+      { name: '2-Point DB Row', setsCount: 4 },
+      { name: 'DB Hip Thrust', setsCount: 3 },
+      { name: 'Dumbbell Shoulder Press', setsCount: 3 },
+      { name: 'Battle Rope Slams', setsCount: 3, measure: 'time' },
+    ],
+  },
+  {
+    name: 'Upper Body',
+    location: 'home',
+    exercises: [
+      { name: 'DB Bench Press', setsCount: 4 },
+      { name: 'Chest-Supported Row', setsCount: 4 },
+      { name: 'DB Arnold Press', setsCount: 3 },
+      { name: 'DB Pullover', setsCount: 3 },
+      { name: 'Hammer Curl', setsCount: 3 },
+      { name: 'DB Skull Crusher', setsCount: 3 },
+    ],
+  },
+  {
+    name: 'Lower Body & Core',
+    location: 'home',
+    exercises: [
+      { name: 'DB Goblet Squat', setsCount: 4 },
+      { name: 'DB Romanian Deadlift (RDL)', setsCount: 4 },
+      { name: 'DB Step-Up', setsCount: 3 },
+      { name: 'DB Hip Thrust', setsCount: 3 },
+      { name: 'Ab Wheel Rollout', setsCount: 3 },
+      { name: 'Russian Twist', setsCount: 3 },
+    ],
+  },
+  {
+    name: 'Conditioning',
+    location: 'home',
+    exercises: [
+      { name: 'DB Thrusters', setsCount: 3 },
+      { name: 'Battle Rope Slams', setsCount: 3, measure: 'time' },
+      { name: 'DB Snatch (Single-Arm)', setsCount: 3 },
+      { name: 'Mountain Climbers', setsCount: 3, measure: 'time' },
+      { name: 'Battle Rope Alternating Waves', setsCount: 3, measure: 'time' },
+      { name: 'Ab Wheel Rollout', setsCount: 3 },
+    ],
+  },
+  {
+    // No equipment: 5 sets × 5 reps at every station.
+    name: 'Bodyweight 5x5',
+    location: 'home',
+    exercises: [
+      { name: 'Burpees', setsCount: 5, reps: 5 },
+      { name: 'Push-Ups', setsCount: 5, reps: 5 },
+      { name: 'Mountain Climbers', setsCount: 5, reps: 5, measure: 'reps' },
+      { name: 'Bodyweight Air Squat', setsCount: 5, reps: 5 },
+      { name: 'Jump Squats', setsCount: 5, reps: 5 },
+      { name: 'Jumping Jacks', setsCount: 5, reps: 5 },
     ],
   },
 ];

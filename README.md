@@ -6,10 +6,10 @@ Live at **https://workout-logger.aarontoledo.com**
 
 ## Features
 
-- **156-exercise library** in 13 movement-pattern categories, with search that understands abbreviations (DB, KB, RDL) and nicknames ("cart"/"prowler" → sled)
+- **160-exercise library** in 13 movement-pattern categories, with search that understands abbreviations (DB, KB, RDL) and nicknames ("cart"/"prowler" → sled)
 - **Tracking per exercise**: weight × reps, reps, time, distance, calories, weight × distance, or weight × time. Some exercises can switch (e.g. bike by time, distance, or calories), and the app remembers your last choice
 - **Units that match the equipment**: yards for sleds and carries, meters for rower/SkiErg, miles for air bike and treadmill
-- **Rest timer**, presets, and repeating any past session (or "Last Session")
+- **Rest timer**, presets for the gym and a home gym (dumbbells, bench, ab wheel, battle ropes, bodyweight), and repeating any past session (or "Last Session")
 - **History** with full summaries, copy-to-clipboard, and per-workout delete
 - **Backup & transfer**: export/import history as a JSON file, or share one workout as a link
 

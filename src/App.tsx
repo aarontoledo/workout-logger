@@ -9,7 +9,7 @@ import {
 import {
   ALL_EXERCISES, EXERCISE_LIBRARY, MEASURE_FIELDS, MEASURE_LABELS, MEASURE_SHORT, PRESET_ROUTINES,
   fieldConfig, getExerciseInfo, getMeasure,
-  type DistanceUnit, type Field, type Measure, type StationConfig,
+  type DistanceUnit, type Field, type Measure, type PresetLocation, type StationConfig,
 } from './exercises';
 import { ExercisePicker } from './ExercisePicker';
 import {
@@ -23,6 +23,18 @@ type View = 'setup' | 'workout' | 'summary' | 'history' | 'shared';
 type Notice = { kind: 'ok' | 'error'; text: string; view: View };
 
 const STORAGE_KEY = 'workout_history';
+const PRESET_LOCATION_KEY = 'preset_location';
+
+const loadPresetLocation = (): PresetLocation => {
+  try {
+    return localStorage.getItem(PRESET_LOCATION_KEY) === 'home' ? 'home' : 'gym';
+  } catch {
+    return 'gym';
+  }
+};
+
+const firstPresetFor = (location: PresetLocation) =>
+  (PRESET_ROUTINES.find(p => p.location === location) ?? PRESET_ROUTINES[0]).exercises.map(ex => ({ ...ex }));
 
 /** How a station's sets are measured and displayed. */
 type Tracking = { measure: Measure; unit: DistanceUnit };
@@ -158,9 +170,18 @@ export default function App() {
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('All');
   
   // Setup State - Array of 6 station configurations (name + independent sets count)
-  const [stationConfigs, setStationConfigs] = useState<StationConfig[]>(
-    () => PRESET_ROUTINES[0].exercises.map(ex => ({ ...ex }))
-  );
+  // Which preset list is shown (Gym or Home); remembered on this device.
+  const [presetLocation, setPresetLocation] = useState<PresetLocation>(loadPresetLocation);
+  const choosePresetLocation = (location: PresetLocation) => {
+    setPresetLocation(location);
+    try {
+      localStorage.setItem(PRESET_LOCATION_KEY, location);
+    } catch {
+      // Not saved (e.g. private browsing); the toggle still works for this visit.
+    }
+  };
+
+  const [stationConfigs, setStationConfigs] = useState<StationConfig[]>(() => firstPresetFor(presetLocation));
 
   // Active Workout Data Structure
   const [activeWorkout, setActiveWorkout] = useState<Station[]>([]);
@@ -386,6 +407,8 @@ export default function App() {
       const prev = getPreviousHistory(config.name);
       const { distanceUnit } = getExerciseInfo(config.name);
       const initial = setValues(prev?.set, distanceUnit);
+      // A preset's starting reps (e.g. 5x5) take priority over last time's reps.
+      if (config.reps !== undefined) initial.reps = config.reps;
       const count = config.setsCount || 3;
       
       const sets = Array.from({ length: count }, (_, i) => ({
@@ -413,7 +436,7 @@ export default function App() {
     setStationConfigs(prev => {
       const updated = [...prev];
       // A different exercise gets its own default / last-used tracking.
-      updated[index] = { ...updated[index], name, measure: undefined };
+      updated[index] = { ...updated[index], name, measure: undefined, reps: undefined };
       return updated;
     });
   };
@@ -686,7 +709,25 @@ export default function App() {
 
           {/* Quick Routine Presets Bar */}
           <div className="mb-3">
-            <div className="text-xs text-slate-400 mb-2 font-medium">Quick Preset Templates:</div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-slate-400 font-medium">Quick Preset Templates:</div>
+              <div role="radiogroup" aria-label="Preset location" className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                {(['gym', 'home'] as const).map(loc => (
+                  <button
+                    key={loc}
+                    type="button"
+                    role="radio"
+                    aria-checked={presetLocation === loc}
+                    onClick={() => choosePresetLocation(loc)}
+                    className={`px-3 py-1 text-[11px] font-bold rounded-md transition-all ${
+                      presetLocation === loc ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {loc === 'gym' ? 'Gym' : 'Home'}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
               {history.length > 0 && (
                 <button
@@ -696,9 +737,9 @@ export default function App() {
                   <RotateCcw className="w-3.5 h-3.5" /> Last Session
                 </button>
               )}
-              {PRESET_ROUTINES.map((routine, idx) => (
+              {PRESET_ROUTINES.filter(routine => routine.location === presetLocation).map(routine => (
                 <button
-                  key={idx}
+                  key={routine.name}
                   onClick={() => {
                     setStationConfigs(routine.exercises.map(ex => ({ ...ex })));
                     setLoadedFrom(null);
@@ -794,7 +835,12 @@ export default function App() {
                   />
 
                   <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-400">
-                    <span>{lastStat ? `Last: ${formatSet(lastStat.set, lastStat.tracking)}` : ''}</span>
+                    <span>
+                      {config.reps !== undefined && (
+                        <span className="text-amber-400/90 font-semibold mr-2">Starts at {config.reps} reps</span>
+                      )}
+                      {lastStat ? `Last: ${formatSet(lastStat.set, lastStat.tracking)}` : ''}
+                    </span>
                     {measureOptions.length === 1 && (
                       <span className="text-slate-500">Tracks {MEASURE_LABELS[measureOptions[0]]}</span>
                     )}
