@@ -11,6 +11,7 @@ Live at **https://workout-logger.aarontoledo.com**
 - **Units that match the equipment**: yards for sleds and carries, meters for rower/SkiErg, miles for air bike and treadmill
 - **Rest timer**, presets for the gym and a home gym (dumbbells, bench, ab wheel, battle ropes, bodyweight), and repeating any past session (or "Last Session")
 - **History** with full summaries, copy-to-clipboard, and per-workout delete
+- **Progress**: workouts per week and streak, a chart of each exercise's best set per session (estimated 1-rep max for weighted lifts), and personal records, with PR badges on workout summaries
 - **Backup & transfer**: export/import history as a JSON file, or share one workout as a link
 
 History is stored in the browser's `localStorage` (key `workout_history`); there is no server-side storage. On iPhone, add the app to the Home Screen: Safari may clear data for sites in a regular tab that go unvisited for 7 days.
@@ -38,5 +39,8 @@ Hosted on Cloudflare Workers as a static single-page app ([wrangler.jsonc](wrang
 | `src/exercises.ts` | Exercise library, tracking types, units, presets, search |
 | `src/ExercisePicker.tsx` | Exercise search dropdown (replaces `<datalist>`, which iOS handles poorly) |
 | `src/transfer.ts` | Backup export/import and share-link encoding |
+| `src/progress.ts` | Progress calculations: best set per session, PRs, weekly counts |
+| `src/ProgressView.tsx` | Progress screen and its SVG charts |
+| `src/format.ts` | Shared helpers for reading and formatting saved sets |
 | `src/types.ts` | Saved workout data types |
 | `worker/` | Worker entry point, currently unused. Kept for a future sync API (`main` is not set in `wrangler.jsonc`) |

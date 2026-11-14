@@ -3,21 +3,24 @@ import {
   Dumbbell, Play, Plus, Check, Clock, Copy,
   Trash2, BarChart2, Flame, Award, ArrowLeft,
   CheckCircle, Zap, RefreshCw, Layers, ChevronRight, RotateCcw,
-  Download, Upload, Share2, BookmarkPlus, X
+  Download, Upload, Share2, BookmarkPlus, X, TrendingUp, Trophy
 } from 'lucide-react';
 
 import {
   ALL_EXERCISES, EXERCISE_LIBRARY, MEASURE_FIELDS, MEASURE_LABELS, MEASURE_SHORT, PRESET_ROUTINES,
-  fieldConfig, getExerciseInfo, getMeasure,
+  fieldConfig, getExerciseInfo,
   type DistanceUnit, type Field, type Measure, type PresetLocation, type StationConfig,
 } from './exercises';
 import { ExercisePicker } from './ExercisePicker';
 import {
   SHARE_HASH_PREFIX, buildShareUrl, decodeWorkout, exportHistory, mergeWorkouts, parseBackup, shareLink,
 } from './transfer';
-import type { Station, WorkoutLog, WorkoutSet } from './types';
+import type { Station, WorkoutLog } from './types';
+import { formatSet, setValues, stationTracking } from './format';
+import { prExercisesInWorkout } from './progress';
+import { ProgressView } from './ProgressView';
 
-type View = 'setup' | 'workout' | 'summary' | 'history' | 'shared';
+type View = 'setup' | 'workout' | 'summary' | 'history' | 'shared' | 'progress';
 
 // `view` is the screen the message belongs to, so it doesn't follow you elsewhere.
 type Notice = { kind: 'ok' | 'error'; text: string; view: View };
@@ -35,55 +38,6 @@ const loadPresetLocation = (): PresetLocation => {
 
 const firstPresetFor = (location: PresetLocation) =>
   (PRESET_ROUTINES.find(p => p.location === location) ?? PRESET_ROUTINES[0]).exercises.map(ex => ({ ...ex }));
-
-/** How a station's sets are measured and displayed. */
-type Tracking = { measure: Measure; unit: DistanceUnit };
-
-const stationTracking = (st: Station): Tracking => ({
-  measure: st.measure ?? getMeasure(st.name),
-  // Before distance units were added, every distance was logged in yards.
-  unit: st.distanceUnit ?? 'yds',
-});
-
-// The values a set carries forward to the next set (everything except number/completion).
-const setValues = (s: Partial<WorkoutSet> = {}, unit: DistanceUnit = 'yds') => ({
-  weight: s.weight ?? fieldConfig('weight').defaultValue,
-  reps: s.reps ?? fieldConfig('reps').defaultValue,
-  seconds: s.seconds ?? fieldConfig('seconds').defaultValue,
-  distance: s.distance ?? fieldConfig('distance', unit).defaultValue,
-  calories: s.calories ?? fieldConfig('calories').defaultValue,
-});
-
-const formatDuration = (totalSeconds: number) => {
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  const m = Math.floor(totalSeconds / 60);
-  const sec = totalSeconds % 60;
-  return `${m}:${sec < 10 ? '0' : ''}${sec}`;
-};
-
-/** Human-readable set result, e.g. "50 lbs × 10 reps", "45s", "500 m", "70 lbs × 40 yds". */
-const formatSet = (s: WorkoutSet, tracking: Tracking, compact = false) => {
-  const measure = s.measure ?? tracking.measure;
-  const unit = tracking.unit;
-  const v = setValues(s, unit);
-  const dist = compact ? `${v.distance}${unit === 'yds' ? 'yd' : unit}` : `${v.distance} ${unit}`;
-  switch (measure) {
-    case 'weight_reps':
-      return compact ? `${v.weight}×${v.reps}` : `${v.weight} lbs × ${v.reps} reps`;
-    case 'reps':
-      return `${v.reps} reps`;
-    case 'time':
-      return formatDuration(v.seconds);
-    case 'distance':
-      return dist;
-    case 'calories':
-      return `${v.calories} cal`;
-    case 'weight_distance':
-      return compact ? `${v.weight}×${dist}` : `${v.weight} lbs × ${dist}`;
-    case 'weight_time':
-      return compact ? `${v.weight}×${formatDuration(v.seconds)}` : `${v.weight} lbs × ${formatDuration(v.seconds)}`;
-  }
-};
 
 /** Segmented switch for exercises that can be tracked more than one way. */
 function MeasureSwitch({ options, value, onChange }: {
@@ -663,13 +617,23 @@ export default function App() {
                 <p className="text-xs text-slate-400">Independent Sets Per Station</p>
               </div>
             </div>
-            <button 
-              onClick={() => setView('history')}
-              className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 hover:text-white"
-              title="Workout History"
-            >
-              <BarChart2 className="w-5 h-5" />
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setView('progress'); window.scrollTo(0, 0); }}
+                className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 hover:text-white"
+                title="Progress"
+                aria-label="Progress"
+              >
+                <TrendingUp className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setView('history')}
+                className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 hover:text-white"
+                title="Workout History"
+              >
+                <BarChart2 className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {notice?.view === view && (
@@ -1147,6 +1111,8 @@ export default function App() {
     const sharedSaved = isShared && history.some(h => h.id === latest.id);
     const shareReady = shareUrl?.id === latest.id;
     const leaveShared = () => { setSharedWorkout(null); setView('setup'); };
+    // Exercises where this workout beat a previous best (only for workouts in this device's history).
+    const prNames = isShared ? new Set<string>() : prExercisesInWorkout(history, latest.id);
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between max-w-md mx-auto p-4 border-x border-slate-900 font-sans">
@@ -1195,8 +1161,13 @@ export default function App() {
             <div className="space-y-3">
               {latest?.stations.map((st, i) => (
                 <div key={i} className="border-b border-slate-800/80 pb-2.5 last:border-0 last:pb-0">
-                  <div className="text-sm font-bold text-slate-200">
-                    Station {i + 1}: {st.name}
+                  <div className="text-sm font-bold text-slate-200 flex items-center justify-between gap-2">
+                    <span>Station {i + 1}: {st.name}</span>
+                    {prNames.has(st.name.trim().toLowerCase()) && (
+                      <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5">
+                        <Trophy className="w-3 h-3" /> NEW PR
+                      </span>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-2 mt-1">
                     {st.sets.filter(s => s.completed).map((s, idx) => (
@@ -1304,6 +1275,10 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  if (view === 'progress') {
+    return <ProgressView history={history} onBack={() => setView('setup')} />;
   }
 
   // History (also the fallback if the summary's workout no longer exists)
